@@ -1,0 +1,85 @@
+The error indicates that the `google` module is not found. This could be because the `google-generativeai` package is not installed in your virtual environment. To resolve this, you need to install the `google-generativeai` package specifically.
+
+Follow these steps:
+
+1. Activate your virtual environment:
+   ```sh
+   source /home/rogerio/PycharmProjects/bartdias/venv/bin/activate
+   ```
+
+2. Install the `google-generativeai` package:
+   ```sh
+   pip install google-generativeai
+   ```
+
+3. Verify the installation:
+   ```sh
+   pip list | grep google-generativeai
+   ```
+
+After installing the package, try running your script again. This should resolve the `ModuleNotFoundError`.
+
++++++++++++++++++++++++++++++++++++++++++++++++
+
+Para garantir que a variável ambiental `GOOGLE_API_KEY` seja configurada automaticamente toda vez que você ativar o ambiente virtual do seu projeto, você pode adicionar o comando `export` ao script de ativação do ambiente virtual.
+
+Siga os passos abaixo:
+
+1. Abra o arquivo de ativação do ambiente virtual. O caminho geralmente é algo como `venv/bin/activate`.
+
+2. Adicione a linha para exportar a variável ambiental `GOOGLE_API_KEY` no final do arquivo.
+
+O arquivo `venv/bin/activate` deve ficar assim:
+
+```sh
+# ... conteúdo existente do arquivo ...
+
+export GOOGLE_API_KEY="your_api_key"
+```
+
+Agora, toda vez que você ativar o ambiente virtual com o comando `source /home/rogerio/PycharmProjects/bartdias/venv/bin/activate`.
+
+++
+
+echo $GOOGLE_API_KEY
+
+If `echo $GOOGLE_API_KEY` returns the variable correctly in the terminal but `check_variables.py` can't find it, it might be due to the environment in which the script is being executed. Ensure that the script is run in the same terminal session where the environment variable is set.
+
+Here are the steps to verify:
+
+1. **Activate the virtual environment**:
+   ```sh
+   source /home/rogerio/PycharmProjects/bartdias/venv/bin/activate
+   ```
+
+2. **Run the script in the same terminal**:
+   ```sh
+   python /home/rogerio/PycharmProjects/bartdias/check_variables.py
+   ```
+
+++
+
+It works, but why when I run into the PyCharm IDE it can't find it?
+
+When running your script in PyCharm, the IDE might not be using the same terminal session where the environment variable is set. To ensure that PyCharm recognizes the environment variable, you can set it within the IDE itself.
+
+Here are the steps to set the environment variable in PyCharm:
+
+1. **Open your project in PyCharm**.
+2. **Go to `Run` > `Edit Configurations...`**.
+3. **Select your script configuration** (or create a new one if it doesn't exist).
+4. **In the `Configuration` tab, find the `Environment variables` field**.
+5. **Click the `...` button next to the `Environment variables` field**.
+6. **Add a new environment variable**:
+   - **Name**: `GOOGLE_API_KEY`
+   - **Value**: `your_api_key`
+7. **Click `OK` to save the environment variable**.
+8. **Click `Apply` and then `OK` to save the configuration**.
+
+Now, when you run your script in PyCharm, it should recognize the `GOOGLE_API_KEY` environment variable.
+
+AIzaSyDlfoPhmDHCIuO6x-wh1N8Qe8wXOjd5xmE
+
+
+
+
