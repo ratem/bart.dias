@@ -10,85 +10,6 @@ class BDiasParser:
         """Initializes the parser."""
         pass
 
-    '''
-    def parse(self, code):
-        try:
-            tree = ast.parse(code)
-            return self._analyze_tree(tree)
-        except SyntaxError as e:
-            print(f"Syntax error in code at line {e.lineno}: {e.msg}")  # More informative error message
-            return None
-
-    def _analyze_tree(self, tree):
-        """Analyzes the AST and extracts parallelization opportunities."""
-
-        structured_code = {
-            "loops": [],
-            "functions": [],
-            "list_comprehensions": []
-        }
-        processed_functions = set()  # Keep track of functions already analyzed
-
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.For, ast.While)):
-                loop_data = self._extract_loop_data(node, tree)  # Passing the tree to check for nested loops
-                if loop_data and self.is_loop_parallelizable(node):  # Check if parallelizable before storing
-                    structured_code["loops"].append(loop_data)
-
-            elif isinstance(node, ast.FunctionDef):
-                function_name = node.name
-                if function_name in processed_functions:
-                    continue
-
-                processed_functions.add(function_name)
-
-                function_data = self._extract_function_data(node, tree, function_name)  # Extract function before dependencies check
-                if function_data:
-                    is_recursive = any(f.get('type') == 'recursive function' for f in function_data)  # Check if it has been identified as recursive by the call check
-
-                    if not self.uses_global_variables(node) and self.is_function_parallelizable(node):
-                        for data in function_data:
-                            if data["type"] == "function":
-                                data["type"] = "recursive function definition" if is_recursive else "function"  # Mark function as recursive or not
-                            structured_code["functions"].append(data)
-
-            elif isinstance(node, ast.ListComp):
-                listcomp_data = self._extract_list_comprehension_data(node)
-                if listcomp_data and self.is_listcomp_parallelizable(listcomp_data.get("body", "")):  # Check dependencies
-                    structured_code["list_comprehensions"].append(listcomp_data)
-
-        return structured_code
-    '''
-    def _extract_loop_data(self, node, tree):  # Now takes the full tree
-        """Extract data for loops (for or while)."""
-
-        if isinstance(node, ast.For):
-            if isinstance(node.target, ast.Name): # Simple loop variable
-                loop_var = node.target.id
-                iterable_name = self._get_iterable_name(node.iter)
-
-                # Check for nested loops (corrected logic)
-                is_nested = False
-                for parent in ast.walk(tree):  # Corrected nested loop check
-                    if parent != node and isinstance(parent, ast.For) and node in ast.walk(parent):
-                        is_nested = True
-                        break
-                loop_type = "nested loop" if is_nested else "loop"
-
-                return {
-                    "type": loop_type,
-                    "lineno": node.lineno,
-                    "loop_var": loop_var,
-                    "iterable_name": iterable_name,
-                    "body": ast.unparse(node)  # Now returns the full loop, to be later checked
-                }
-            return None #Returns None for complex loops, for instance, tuple unpacking
-        elif isinstance(node, ast.While):
-            return {
-                "type": "while",
-                "lineno": node.lineno,
-                "body": ast.unparse(node)  # Now returns the full loop, to be later checked
-            }
 
     def _extract_function_data(self, node, tree, function_name):
       """Extract data for functions, loops calling functions, and function calls inside other functions."""
@@ -183,64 +104,171 @@ class BDiasParser:
                        return True
         return False
 
-    '''
-    def is_loop_parallelizable(self, loop_node):
-        """Checks if a loop is potentially parallelizable."""
 
-        loop_var = None
-        if isinstance(loop_node, ast.For):
-            if isinstance(loop_node.target, ast.Name):
-               loop_var = loop_node.target.id
-            else:
-              return False  # Skip loops with complex targets
+    def _calculate_nesting_depth(self, node, tree):
+        """Calculate the nesting depth of a loop."""
+        depth = 1  # Start with depth 1 for the current loop
 
-        for node in ast.walk(loop_node):
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                if loop_var and node.id != loop_var:
-                    return False
-            elif isinstance(node, (ast.Break, ast.Continue)):
-                return False
+        # Find all parent nodes that are loops
+        current = node
+        for parent in ast.walk(tree):
+            if parent != current and (isinstance(parent, ast.For) or isinstance(parent, ast.While)):
+                # Check if current is inside parent
+                if current in ast.walk(parent):
+                    depth += 1
+                    current = parent
 
-        return True
+        return depth
 
+    def _find_function_def(self, function_name, tree):
+        """Find the function definition node for a given function name."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                return node
+        return None
 
-    def is_function_parallelizable(self, function_node):
-        """Checks if a function is potentially parallelizable."""
-
+    def _is_recursive_function(self, function_node):
+        """Check if a function contains recursive calls to itself."""
+        function_name = function_node.name
         for node in ast.walk(function_node):
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                if node.id not in function_node.args.args and node.id != 'self':
-                    current = node
-                    while hasattr(current, 'parent'): # Search for a call node among parents
-                        current = current.parent
-                        if isinstance(current, ast.Call):
-                           break #Stop if found a call
-                    else: # If no call is among the parents, there might be a global
-                       return False  # Not parallelizable if stores to non-arguments outside a call
-            elif isinstance(node, ast.Return) and any(isinstance(parent, (ast.For, ast.While)) for parent in ast.walk(function_node)):
-                  return False
-        return True
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id == function_name:
+                    return True
+        return False
 
-    def is_listcomp_parallelizable(self, listcomp_code):
-        """Checks if a list comprehension is potentially parallelizable."""
+    def _function_contains_loops(self, function_node):
+        """Check if a function contains loops."""
+        for node in ast.walk(function_node):
+            if isinstance(node, (ast.For, ast.While)):
+                return True
+        return False
 
-        try:
-            tree = ast.parse(listcomp_code)  # Parse the list comprehension body
 
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                    # Ignore assignments to the list comprehension's target variable
-                    if not any(isinstance(parent, ast.comprehension) and node.id == parent.target.id for parent in ast.walk(tree)):
-                        return False
+    def _extract_loop_data(self, node, tree):
+        """Extract data for loops (for or while) with enhanced combo detection."""
+        if isinstance(node, ast.For):
+            if isinstance(node.target, ast.Name):  # Simple loop variable
+                loop_var = node.target.id
+                iterable_name = self._get_iterable_name(node.iter)
 
-            return True
-        except SyntaxError:
-            return False
-    '''
+                # Calculate nesting depth
+                nesting_depth = self._calculate_nesting_depth(node, tree)
 
-    #
-    # VERSION 1.6 IMPROVEMENTS
-    #
+                # Check if this for loop is inside a while loop
+                is_in_while = False
+                for parent in ast.walk(tree):
+                    if parent != node and isinstance(parent, ast.While) and node in ast.walk(parent):
+                        is_in_while = True
+                        break
+
+                # Check for recursive function calls inside this for loop
+                recursive_calls = []
+                for subnode in ast.walk(node):
+                    if isinstance(subnode, ast.Call) and isinstance(subnode.func, ast.Name):
+                        # Find the function definition
+                        func_def = self._find_function_def(subnode.func.id, tree)
+                        if func_def:
+                            # Check if this function is recursive
+                            is_recursive = self._is_recursive_function(func_def)
+                            if is_recursive:
+                                recursive_calls.append(subnode.func.id)
+
+                # Check for function calls inside this loop that themselves contain loops
+                loop_function_calls = []
+                for subnode in ast.walk(node):
+                    if isinstance(subnode, ast.Call) and isinstance(subnode.func, ast.Name):
+                        # Find the function definition
+                        func_def = self._find_function_def(subnode.func.id, tree)
+                        if func_def:
+                            # Check if this function contains loops
+                            has_loops = self._function_contains_loops(func_def)
+                            if has_loops:
+                                loop_function_calls.append(subnode.func.id)
+
+                # Check for nested loops (corrected logic)
+                is_nested = False
+                for parent in ast.walk(tree):  # Corrected nested loop check
+                    if parent != node and isinstance(parent, ast.For) and node in ast.walk(parent):
+                        is_nested = True
+                        break
+
+                # Determine loop type based on various conditions
+                if is_in_while:
+                    loop_type = "for_in_while"
+                elif recursive_calls:
+                    loop_type = "for_with_recursive_call"
+                elif loop_function_calls:
+                    loop_type = "for_with_loop_functions"
+                elif is_nested:
+                    loop_type = "nested loop"
+                else:
+                    loop_type = "loop"
+
+                loop_data = {
+                    "type": loop_type,
+                    "lineno": node.lineno,
+                    "loop_var": loop_var,
+                    "iterable_name": iterable_name,
+                    "nesting_depth": nesting_depth,
+                    "body": ast.unparse(node)
+                }
+
+                # Add additional data based on loop type
+                if recursive_calls:
+                    loop_data["recursive_calls"] = recursive_calls
+                if loop_function_calls:
+                    loop_data["loop_function_calls"] = loop_function_calls
+
+                return loop_data
+
+            return None  # Returns None for complex loops, for instance, tuple unpacking
+
+        elif isinstance(node, ast.While):
+            # Check for for loops inside this while loop
+            has_for_loop = False
+            for_loops_inside = []
+            for subnode in ast.walk(node):
+                if subnode != node and isinstance(subnode, ast.For):
+                    has_for_loop = True
+                    for_loops_inside.append(subnode.lineno)
+
+            # Check for function calls inside this loop that themselves contain loops
+            loop_function_calls = []
+            for subnode in ast.walk(node):
+                if isinstance(subnode, ast.Call) and isinstance(subnode.func, ast.Name):
+                    # Find the function definition
+                    func_def = self._find_function_def(subnode.func.id, tree)
+                    if func_def:
+                        # Check if this function contains loops
+                        has_loops = self._function_contains_loops(func_def)
+                        if has_loops:
+                            loop_function_calls.append(subnode.func.id)
+
+            # Calculate nesting depth
+            nesting_depth = self._calculate_nesting_depth(node, tree)
+
+            # Determine loop type
+            if has_for_loop:
+                loop_type = "while_with_for"
+            elif loop_function_calls:
+                loop_type = "while_with_loop_functions"
+            else:
+                loop_type = "while"
+
+            loop_data = {
+                "type": loop_type,
+                "lineno": node.lineno,
+                "nesting_depth": nesting_depth,
+                "body": ast.unparse(node)
+            }
+
+            # Add additional data based on loop type
+            if has_for_loop:
+                loop_data["for_loops_inside"] = for_loops_inside
+            if loop_function_calls:
+                loop_data["loop_function_calls"] = loop_function_calls
+
+            return loop_data
 
     def is_loop_parallelizable(self, loop_node):
         """Checks if a loop is potentially parallelizable."""
@@ -320,11 +348,12 @@ class BDiasParser:
             return None
 
     def _analyze_tree(self, tree):
-        """Analyzes the AST and extracts parallelization opportunities with enhanced dependency analysis."""
+        """Analyzes the AST and extracts parallelization opportunities with enhanced combo detection."""
         structured_code = {
             "loops": [],
             "functions": [],
-            "list_comprehensions": []
+            "list_comprehensions": [],
+            "combos": []  # New category for combo patterns
         }
 
         processed_functions = set()  # Keep track of functions already analyzed
@@ -338,7 +367,12 @@ class BDiasParser:
                     loop_data["dependency_graph"] = self.build_dependency_graph(node)
                     loop_data["data_flow_deps"] = self.analyze_data_flow(node)
 
-                    if self.is_loop_parallelizable(node):
+                    # Check if this is a combo pattern
+                    if any(combo_type in loop_data.get("type", "") for combo_type in
+                           ["for_in_while", "while_with_for", "for_with_recursive_call",
+                            "for_with_loop_functions", "while_with_loop_functions"]):
+                        structured_code["combos"].append(loop_data)
+                    elif self.is_loop_parallelizable(node):
                         structured_code["loops"].append(loop_data)
 
             elif isinstance(node, ast.FunctionDef):
@@ -560,7 +594,8 @@ class BDiasParser:
 
         # Check if called functions modify globals
         for func_name in called_functions:
-            func_node = self._find_function_def(func_name)
+            # Pass self.tree as the second argument to _find_function_def
+            func_node = self._find_function_def(func_name, self.tree)
             if func_node and self.uses_global_variables(func_node):
                 # Identify which globals are modified
                 for subnode in ast.walk(func_node):
@@ -571,7 +606,7 @@ class BDiasParser:
 
         return modified_globals
 
-    def _find_function_def(self, function_name):
+    def _find_function_def(self, function_name, tree):
         """
         Find the function definition node for a given function name.
 
@@ -581,9 +616,8 @@ class BDiasParser:
         Returns:
             The AST node for the function definition, or None if not found
         """
-        # This would need to be implemented to search through the entire AST
-        # For now, we'll assume the function is defined in the current module
-        for node in ast.walk(self.tree):  # self.tree would be the full AST
+
+        for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == function_name:
                 return node
         return None

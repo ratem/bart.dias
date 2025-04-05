@@ -45,53 +45,71 @@ class BDiasAssist:
     def display_opportunities(self, structured_code, code):
         """Presents parallelization opportunities to the user."""
         has_opportunities = any(structured_code[key] for key in structured_code)
+
         if not has_opportunities:
             print("No parallelization opportunities identified in the given code.")
             return
 
         print("Potential Parallelization Opportunities:")
+
         suggestions = self.code_generator.generate_suggestions(structured_code)
 
         for suggestion in suggestions:
             try:
-                if suggestion["opportunity_type"] == 'loop' and suggestion.get("iterable_name"):  # Correct condition for loops with iterable_name
-                    print(f'  - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
+                if suggestion["opportunity_type"] == 'loop' and suggestion.get("iterable_name"):
+                    print(
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
                 elif suggestion["opportunity_type"] == 'nested loop':
-                    print(f'  - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
-                elif suggestion["opportunity_type"] == 'while':  # Correct condition for while loops
-                    print(f'  - Line {suggestion["lineno"]}: This `while` loop may be parallelizable.')  # Specific message for while loops, no formatting
+                    print(
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
+                elif suggestion["opportunity_type"] == 'while':
+                    print(f' - Line {suggestion["lineno"]}: This `while` loop may be parallelizable.')
                 elif suggestion["opportunity_type"] == 'loop and function':
-                    print(f'  - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
+                    print(
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
                 elif suggestion["opportunity_type"] == 'recursive function definition':
-                    print(f'  - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
+                    print(
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
                 elif suggestion["opportunity_type"] == 'recursive function':
-                    print(f'  - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
+                    print(
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
                 elif suggestion["opportunity_type"] == 'function call':
-                    print(f'  - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
+                    print(
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
                 elif suggestion["opportunity_type"] == 'function':
-                    print(f'  - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
+                    print(
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
                 elif suggestion["opportunity_type"] == 'list_comprehension':
-                    print(f'  - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]]}')
-                else:  # Default case if the opportunity type is unknown
-                    print(f"  - Line {suggestion['lineno']}: Default explanation for unknown opportunity type")  # Fallback message
+                    print(
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]]}')
+                else:
+                    print(f" - Line {suggestion['lineno']}: Default explanation for unknown opportunity type")
 
-            except KeyError as e:  # Handle any remaining KeyErrors
-                print(f"KeyError in display_opportunities: Missing key '{e}' in suggestion: {suggestion}, explanation_index: {suggestion.get('explanation_index', 'N/A')}")
-                print(f'  - Line {suggestion["lineno"]}: Default explanation for {suggestion.get("opportunity_type", "unknown opportunity type")}')
+                # Try to print partitioning suggestions
+                try:
+                    print(
+                        f' Partitioning suggestion: {self.code_generator.PARTITIONING_SUGGESTIONS[suggestion["explanation_index"]]}')
+                except KeyError as e:
+                    print(
+                        f"KeyError in display_opportunities: Missing partitioning suggestion for explanation index '{e}'")
 
-            try: #Try to print partitioning suggestions
-                print(f'    Partitioning suggestion: {self.code_generator.PARTITIONING_SUGGESTIONS[suggestion["explanation_index"]]}')
+                print(f' ---Original code:\n {code.splitlines()[suggestion["lineno"] - 1]}')
+                print(' ---Code suggestion:')
+                print(f' {suggestion["code_suggestion"]}')
+
+                if suggestion.get("llm_suggestion"):
+                    print(suggestion["llm_suggestion"])
+
+                print("---")  # Separator between suggestions
+
             except KeyError as e:
-                 print(f"KeyError in display_opportunities: Missing partitioning suggestion for explanation index '{e}'")
-
-            print(f'    ---Original code:\n    {code.splitlines()[suggestion["lineno"]-1]}')
-            print('    ---Code suggestion:')
-            print(f'   {suggestion["code_suggestion"]}')
-            if suggestion.get("llm_suggestion"):
-                print(suggestion["llm_suggestion"])
-            print("---")  # Separator between suggestions
+                print(f"KeyError in display_opportunities: Missing key '{e}' in suggestion: {suggestion}")
+                print(
+                    f' - Line {suggestion.get("lineno", "unknown")}: Default explanation for {suggestion.get("opportunity_type", "unknown opportunity type")}')
+                print("---")
 
         print("---")  # Final separator
+    print("End of suggestions.")
 
     def run_interactive_session(self):
        """Runs the interactive session, prompting the user and processing code."""
