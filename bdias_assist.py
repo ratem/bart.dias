@@ -56,43 +56,51 @@ class BDiasAssist:
 
         for suggestion in suggestions:
             try:
-                if suggestion["opportunity_type"] == 'loop' and suggestion.get("iterable_name"):
+                opportunity_type = suggestion.get("opportunity_type", "unknown")
+                explanation_index = suggestion.get("explanation_index", "")
+
+                # Basic loop patterns
+                if opportunity_type in ['loop', 'nested loop']:
                     print(
-                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
-                elif suggestion["opportunity_type"] == 'nested loop':
-                    print(
-                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
-                elif suggestion["opportunity_type"] == 'while':
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index].format(**suggestion)}')
+
+                # While loops
+                elif opportunity_type == 'while':
                     print(f' - Line {suggestion["lineno"]}: This `while` loop may be parallelizable.')
-                elif suggestion["opportunity_type"] == 'loop and function':
+
+                # Function patterns
+                elif opportunity_type in ['function', 'recursive function definition', 'recursive function',
+                                          'function call']:
                     print(
-                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
-                elif suggestion["opportunity_type"] == 'recursive function definition':
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index].format(**suggestion)}')
+
+                # List comprehension
+                elif opportunity_type == 'list_comprehension':
+                    print(f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index]}')
+
+                # Loop and function combination
+                elif opportunity_type == 'loop and function':
                     print(
-                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
-                elif suggestion["opportunity_type"] == 'recursive function':
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index].format(**suggestion)}')
+
+                # Combo patterns
+                elif opportunity_type in ['for_with_recursive_call', 'while_with_for', 'for_in_while',
+                                          'for_with_loop_functions', 'while_with_loop_functions']:
                     print(
-                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
-                elif suggestion["opportunity_type"] == 'function call':
-                    print(
-                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
-                elif suggestion["opportunity_type"] == 'function':
-                    print(
-                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]].format(**suggestion)}')
-                elif suggestion["opportunity_type"] == 'list_comprehension':
-                    print(
-                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[suggestion["explanation_index"]]}')
+                        f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index].format(**suggestion)}')
+
                 else:
-                    print(f" - Line {suggestion['lineno']}: Default explanation for unknown opportunity type")
+                    print(f" - Line {suggestion['lineno']}: Default explanation for {opportunity_type}")
 
-                # Try to print partitioning suggestions
-                try:
+                # Print partitioning suggestion
+                if explanation_index in self.code_generator.PARTITIONING_SUGGESTIONS:
                     print(
-                        f' Partitioning suggestion: {self.code_generator.PARTITIONING_SUGGESTIONS[suggestion["explanation_index"]]}')
-                except KeyError as e:
+                        f' Partitioning suggestion: {self.code_generator.PARTITIONING_SUGGESTIONS[explanation_index]}')
+                else:
                     print(
-                        f"KeyError in display_opportunities: Missing partitioning suggestion for explanation index '{e}'")
+                        f' Partitioning suggestion: Consider data or task partitioning based on the specific pattern.')
 
+                # Print original code and suggestion
                 print(f' ---Original code:\n {code.splitlines()[suggestion["lineno"] - 1]}')
                 print(' ---Code suggestion:')
                 print(f' {suggestion["code_suggestion"]}')
@@ -109,7 +117,7 @@ class BDiasAssist:
                 print("---")
 
         print("---")  # Final separator
-    print("End of suggestions.")
+        print("End of suggestions.")
 
     def run_interactive_session(self):
        """Runs the interactive session, prompting the user and processing code."""

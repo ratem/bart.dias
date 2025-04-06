@@ -13,36 +13,6 @@ class BDiasCodeGen:
         self.PARTITIONING_SUGGESTIONS = partitioning_suggestions
         self.model = None  # Set to None, skip Gemini for now
 
-    def handle_combo(self, combo):
-        """Generates suggestions for combo patterns."""
-        combo_type = combo.get("type", "")
-
-        if "for_in_while" in combo_type or "while_with_for" in combo_type:
-            return {
-                "lineno": combo["lineno"],
-                "opportunity_type": combo_type,
-                "explanation_index": "nested loop",  # Use existing explanation
-                "code_suggestion": self.suggest_parallel_combo_loop(combo),
-                "llm_suggestion": ""
-            }
-        elif "for_with_recursive_call" in combo_type:
-            return {
-                "lineno": combo["lineno"],
-                "opportunity_type": combo_type,
-                "explanation_index": "recursive function",  # Use existing explanation
-                "code_suggestion": self.suggest_parallel_recursive_loop(combo),
-                "llm_suggestion": ""
-            }
-        elif "_with_loop_functions" in combo_type:
-            return {
-                "lineno": combo["lineno"],
-                "opportunity_type": combo_type,
-                "explanation_index": "loop and function",  # Use existing explanation
-                "code_suggestion": self.suggest_parallel_loop_with_functions(combo),
-                "llm_suggestion": ""
-            }
-
-        return None
 
     def handle_function(self, function):
         """Generates suggestions for functions."""
@@ -407,7 +377,7 @@ class BDiasCodeGen:
             return {
                 "lineno": combo["lineno"],
                 "opportunity_type": combo_type,
-                "explanation_index": "for_in_while",  # Use the specific explanation key
+                "explanation_index": "for_in_while",
                 "loop_var": combo.get("loop_var", ""),
                 "iterable_name": combo.get("iterable_name", ""),
                 "code_suggestion": self.suggest_parallel_combo_loop(combo),
@@ -417,7 +387,7 @@ class BDiasCodeGen:
             return {
                 "lineno": combo["lineno"],
                 "opportunity_type": combo_type,
-                "explanation_index": "while_with_for",  # Use the specific explanation key
+                "explanation_index": "while_with_for",
                 "loop_var": combo.get("loop_var", ""),
                 "iterable_name": combo.get("iterable_name", ""),
                 "code_suggestion": self.suggest_parallel_combo_loop(combo),
@@ -427,7 +397,7 @@ class BDiasCodeGen:
             return {
                 "lineno": combo["lineno"],
                 "opportunity_type": combo_type,
-                "explanation_index": "for_with_recursive_call",  # Use the specific explanation key
+                "explanation_index": "for_with_recursive_call",
                 "func_name": combo.get("recursive_calls", [""])[0],
                 "loop_var": combo.get("loop_var", ""),
                 "iterable_name": combo.get("iterable_name", ""),
@@ -438,7 +408,7 @@ class BDiasCodeGen:
             return {
                 "lineno": combo["lineno"],
                 "opportunity_type": combo_type,
-                "explanation_index": "for_with_loop_functions",  # Use the specific explanation key
+                "explanation_index": "for_with_loop_functions",
                 "func_name": combo.get("loop_function_calls", [""])[0],
                 "loop_var": combo.get("loop_var", ""),
                 "iterable_name": combo.get("iterable_name", ""),
@@ -449,7 +419,7 @@ class BDiasCodeGen:
             return {
                 "lineno": combo["lineno"],
                 "opportunity_type": combo_type,
-                "explanation_index": "while_with_loop_functions",  # Use the specific explanation key
+                "explanation_index": "while_with_loop_functions",
                 "func_name": combo.get("loop_function_calls", [""])[0],
                 "loop_var": combo.get("loop_var", ""),
                 "iterable_name": combo.get("iterable_name", ""),
