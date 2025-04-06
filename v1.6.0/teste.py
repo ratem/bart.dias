@@ -1,5 +1,6 @@
 import numpy as np
 import multiprocessing as mp
+import time
 
 
 # Função para calcular o Fibonacci de um número
@@ -70,6 +71,137 @@ def function_with_loop(n):
     result = []
     for i in range(n):
         result.append(i * i)
+    return result
+
+
+# ----- NOVOS TESTES PARA ANÁLISE DE DEPENDÊNCIA APRIMORADA -----
+
+# Função com dependências de variáveis complexas
+def complex_dependencies(data):
+    result = []
+    temp = 0
+    for i in range(len(data)):
+        # Dependência read-after-write em temp
+        temp = data[i] * 2
+        result.append(temp)
+        # Uso de temp após modificação
+        if temp > 10:
+            result.append(temp * 2)
+    return result
+
+
+# Função com dependências entre funções
+def outer_function(n):
+    result = 0
+    # Chamada para função que modifica variável global
+    funcao_com_global()
+    for i in range(n):
+        # Dependência entre chamadas de função
+        result += inner_function(i)
+    return result
+
+
+def inner_function(x):
+    # Acessa variável global
+    global global_var
+    return x * global_var
+
+
+# Função com dependências de loop-carried
+def loop_carried_dependency(data):
+    result = []
+    for i in range(1, len(data)):
+        # Dependência no elemento anterior (loop-carried)
+        value = data[i] + data[i - 1]
+        result.append(value)
+    return result
+
+
+# Função com recursão e dependências complexas
+def recursive_with_dependencies(n, memo=None):
+    if memo is None:
+        memo = {}
+    if n in memo:
+        return memo[n]
+    if n <= 1:
+        return n
+    # Dependência em estado compartilhado (memo)
+    memo[n] = recursive_with_dependencies(n - 1, memo) + recursive_with_dependencies(n - 2, memo)
+    return memo[n]
+
+
+# Função com dependências em parâmetros
+def parameter_dependencies(a, b):
+    result = []
+    # Modificação de parâmetro
+    a += 1
+    for i in range(b):
+        # Dependência no parâmetro modificado
+        result.append(a + i)
+    return result
+
+
+# ----- NOVOS TESTES PARA DETECÇÃO DE COMBOS -----
+
+# Função com while contendo for e recursão
+def while_for_recursive(n):
+    result = 0
+    i = 0
+    while i < n:
+        print(f"While iteration {i}")
+        for j in range(i, n):
+            # For dentro de while com chamada recursiva
+            result += fibonacci(j % 5)
+        i += 1
+    return result
+
+
+# Função com for aninhados de profundidades variadas
+def nested_loops_varying_depth(n):
+    result = 0
+    # Loop de profundidade 1
+    for i in range(n):
+        result += i
+        if i % 2 == 0:
+            # Loop de profundidade 2 (condicional)
+            for j in range(i):
+                result += j
+                if j % 3 == 0:
+                    # Loop de profundidade 3 (condicional)
+                    for k in range(j):
+                        result += k
+    return result
+
+
+# Função com for contendo chamada para função com loop
+def for_with_loop_function(n):
+    result = 0
+    for i in range(n):
+        # Chamada para função que contém loop
+        sub_result = function_with_loop(i + 1)
+        result += sum(sub_result)
+    return result
+
+
+# Função com while contendo função com loop
+def while_with_loop_function(n):
+    result = 0
+    i = 0
+    while i < n:
+        # Chamada para função que contém loop
+        sub_result = function_with_loop(i + 1)
+        result += sum(sub_result)
+        i += 1
+    return result
+
+
+# Função com for contendo chamada recursiva
+def for_with_recursive_call(n):
+    result = 0
+    for i in range(n):
+        # Chamada recursiva dentro do loop
+        if i > 0:
+            result += fibonacci(i)
     return result
 
 
@@ -223,3 +355,57 @@ if __name__ == "__main__":
 
 
     print(f"Resultado da recursão múltipla: {recursive_with_multiple_loops(3)}")
+
+    # ----- NOVOS TESTES PARA ANÁLISE DE DEPENDÊNCIA APRIMORADA -----
+
+    print("\n--- TESTES DE ANÁLISE DE DEPENDÊNCIA APRIMORADA ---")
+
+    print("\nTeste de Função com Dependências Complexas:")
+    data = [5, 10, 15, 20]
+    result = complex_dependencies(data)
+    print(f"Resultado: {result}")
+
+    print("\nTeste de Dependências entre Funções:")
+    result = outer_function(5)
+    print(f"Resultado: {result}")
+
+    print("\nTeste de Dependências Loop-Carried:")
+    data = [1, 2, 3, 4, 5]
+    result = loop_carried_dependency(data)
+    print(f"Resultado: {result}")
+
+    print("\nTeste de Recursão com Dependências:")
+    start_time = time.time()
+    result_with_memo = recursive_with_dependencies(20)
+    memo_time = time.time() - start_time
+    print(f"Resultado com memoização: {result_with_memo}, Tempo: {memo_time:.6f}s")
+
+    print("\nTeste de Dependências em Parâmetros:")
+    a = 5
+    b = 3
+    result = parameter_dependencies(a, b)
+    print(f"Resultado: {result}, a original: {a}")
+
+    # ----- NOVOS TESTES PARA DETECÇÃO DE COMBOS -----
+
+    print("\n--- TESTES ADICIONAIS DE COMBOS ---")
+
+    print("\nTeste de While com For e Recursão:")
+    result = while_for_recursive(4)
+    print(f"Resultado: {result}")
+
+    print("\nTeste de Loops Aninhados com Profundidades Variadas:")
+    result = nested_loops_varying_depth(4)
+    print(f"Resultado: {result}")
+
+    print("\nTeste de For com Função que Contém Loop:")
+    result = for_with_loop_function(3)
+    print(f"Resultado: {result}")
+
+    print("\nTeste de While com Função que Contém Loop:")
+    result = while_with_loop_function(3)
+    print(f"Resultado: {result}")
+
+    print("\nTeste de For com Chamada Recursiva:")
+    result = for_with_recursive_call(5)
+    print(f"Resultado: {result}")
