@@ -463,12 +463,18 @@ class BDiasParser:
     def _may_depend_on(self, var1, var2, node):
         """
         Determine if var1 may depend on var2 based on their usage in the code.
-        """
-        # Skip self-dependencies
-        if var1 == var2:
-            return False
 
-        # Rest of the method remains the same...
+        This is a more sophisticated analysis than simple variable name matching.
+        It considers the control flow and data flow within the node.
+
+        Args:
+            var1: First variable name
+            var2: Second variable name
+            node: AST node containing both variables
+
+        Returns:
+            Boolean indicating if var1 might depend on var2
+        """
         # Find all assignments to var2
         var2_assignments = []
         for subnode in ast.walk(node):
