@@ -25,8 +25,9 @@
 
 ### 4. User Experience Improvements
 
-- Allow users to select which suggestions to implement
-- Provide explanations of why certain code isn't parallelizable
+- Allow users to select which suggestions to implement **PARTIAL**
+- Provide explanations of why certain code isn't parallelizable **SUSPENDED**
+- Static Profiling **PROTOTYPE**
 
 
 ### 5. Code Generation Enhancements 
@@ -39,11 +40,11 @@
 ### 6. Improved Documentation
 
 - Add more comprehensive documentation for each module
-- Document limitations and best practices
+- Document limitations and best practices **PROTOTYPE**
 
 
 ### 7. Intelligence **2.0**
 
 - Fluid dialogue with the user
 - Generate parallel code based on Patterns 
-- Include performance estimates for parallelized vs. sequential code
+- Include performance estimates for parallelized vs. sequential code 
