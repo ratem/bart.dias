@@ -1,11 +1,42 @@
+"""
+Summary of the functionalities and limitations of the current BDiasProfiler class:
+
+Functionalities:
+1. Static code analysis to estimate computational intensity
+2. Identification of computationally intensive code blocks (functions, loops, etc.)
+3. Ranking of code blocks based on estimated intensity
+4. Attempt at runtime validation of static intensity scores
+
+Limitations:
+1. Variables and functions declared outside the analyzed block are not correctly handled, leading to errors during
+runtime validation
+2. The static analysis may not accurately reflect actual runtime performance, especially for complex algorithms or
+data-dependent operations
+3. The profiler doesn't account for external factors like I/O operations or network calls
+4. It may overestimate the importance of nested loops without considering their actual iteration counts
+5. The profiler doesn't consider optimizations that might be applied by the Python interpreter or underlying libraries
+6. Runtime validation is limited and may not work correctly for all types of code blocks
+7. The profiler doesn't account for memory usage or other resource constraints
+8. It may not accurately assess the parallelization potential of certain algorithms or data structures
+9. The static analysis doesn't consider the impact of input data size on performance
+10. The profiler doesn't account for potential optimizations that could be applied by a human programmer
+
+These limitations mean that while the profiler can provide useful insights, its results should be treated as heuristic
+guidance rather than definitive performance metrics. Users should be aware that manual analysis and testing are still
+crucial for accurate performance optimization.
+"""
+
 import ast
+import cProfile
+import pstats
+import io
 from typing import List, Dict, Any
 
 
 class BDiasProfiler:
     """
     Statically profiles Python code to identify computationally intensive sections
-    without executing the code.
+    without executing the code. Includes mitigations for common static analysis pitfalls.
     """
 
     def __init__(self, max_results: int = 5):
@@ -16,6 +47,7 @@ class BDiasProfiler:
             max_results: Maximum number of time-consuming sections to display
         """
         self.max_results = max_results
+        self.calibration_factors = {}  # Store calibration factors for different code blocks
 
     def profile_code(self, parser, code: str) -> List[Dict[str, Any]]:
         """
@@ -107,13 +139,10 @@ class BDiasProfiler:
     def _estimate_computational_intensity(self, node):
         """
         Estimate the computational intensity of a code block based on static analysis.
+        Incorporates mitigation strategies for more accurate estimation.
 
-        This method analyzes various factors that contribute to computational complexity:
-        - Loop nesting depth
-        - Number of function calls
-        - Recursion
-        - Number of operations
-        - Complexity of data structures
+        Args:
+            node: AST node to analyze
 
         Returns:
             A numerical score representing the estimated computational intensity
@@ -124,7 +153,7 @@ class BDiasProfiler:
         node_size = len(ast.unparse(node).splitlines())
         intensity *= (1 + 0.1 * node_size)
 
-        # Adjust based on loop nesting
+        # Adjust based on loop nesting (Strategy 2: Context-aware weight adjustment)
         if isinstance(node, (ast.For, ast.While)):
             # Base score for a loop
             intensity *= 10
@@ -150,64 +179,183 @@ class BDiasProfiler:
             if recursive_calls > 0:
                 intensity *= (10 * recursive_calls)
 
-        # Adjust for operations that are typically computationally intensive
+        # Apply context-specific adjustments (Strategy 2)
+        intensity *= self._adjust_for_context(node)
+
+        # Apply data flow analysis (Strategy 3: Data Flow Integration)
+        intensity *= self._analyze_data_flow(node)
+
+        return intensity
+
+    def _adjust_for_context(self, node):
+        """
+        Adjust computational intensity based on domain-specific context.
+        This is part of mitigation strategy 2: Context-Aware Weight Adjustment.
+
+        Args:
+            node: AST node to analyze
+
+        Returns:
+            Adjustment factor for the intensity
+        """
+        adjustment = 1.0
+
+        # Check for operations on different data structures
         for subnode in ast.walk(node):
             # Math operations
             if isinstance(subnode, ast.BinOp):
-                intensity *= 1.2
+                adjustment *= 1.2
 
             # Function calls to known intensive operations
             if isinstance(subnode, ast.Call) and isinstance(subnode.func, ast.Attribute):
                 if hasattr(subnode.func, 'attr'):
-                    # Check for numpy operations
+                    # Check for numpy operations (potentially GPU-accelerated)
                     if subnode.func.attr in ['dot', 'matmul', 'multiply', 'exp', 'log']:
-                        intensity *= 5
+                        # Reduce weight for potentially GPU-optimized operations
+                        adjustment *= 0.2
+                    # Check for other intensive operations
+                    elif subnode.func.attr in ['sort', 'filter', 'map']:
+                        adjustment *= 2.0
 
             # List/dict comprehensions
             if isinstance(subnode, (ast.ListComp, ast.DictComp, ast.SetComp)):
-                intensity *= 3
+                adjustment *= 3.0
 
             # Exception handling (try/except blocks)
             if isinstance(subnode, ast.Try):
-                intensity *= 1.5
+                adjustment *= 1.5
 
-        return intensity
+        return adjustment
 
-    def get_user_selection(self, ranked_blocks, code_lines):
+    def _analyze_data_flow(self, node):
         """
-        Present the ranked code blocks to the user and get their selection.
+        Analyze data flow to detect early exits and redundant operations.
+        This is part of mitigation strategy 3: Data Flow Integration.
 
         Args:
-            ranked_blocks: List of ranked code blocks
-            code_lines: List of code lines for displaying context
+            node: AST node to analyze
 
         Returns:
-            The selected code block
+            Adjustment factor for the intensity based on data flow analysis
         """
-        print("\nTop computationally intensive sections in your code:")
-        for i, block in enumerate(ranked_blocks):
-            block_type = block["type"].replace("_", " ").title()
-            block_name = block["name"]
-            start_line = block["lineno"]
-            end_line = block["end_lineno"]
+        adjustment = 1.0
 
-            # Show code snippet
-            code_snippet = "\n".join(code_lines[start_line - 1:end_line])
+        # Check for early exits (break, return, continue)
+        early_exits = 0
+        for subnode in ast.walk(node):
+            if isinstance(subnode, (ast.Break, ast.Return, ast.Continue)):
+                early_exits += 1
 
-            print(f"{i + 1}. {block_type}: {block_name} (Lines {start_line}-{end_line})")
-            print(f"   Estimated computational intensity: {block['intensity']:.2f}")
-            print(f"   Code snippet:")
-            for line in code_snippet.splitlines()[:3]:  # Show first 3 lines
-                print(f"      {line}")
-            if len(code_snippet.splitlines()) > 3:
-                print("      ...")
+        # If there are early exits, reduce intensity based on their position
+        if early_exits > 0:
+            # Simple heuristic: more early exits = more potential for early termination
+            adjustment *= max(0.5, 1.0 - (0.1 * early_exits))
 
-        while True:
-            try:
-                selection = int(input(f"\nSelect a section to optimize (1-{len(ranked_blocks)}): "))
-                if 1 <= selection <= len(ranked_blocks):
-                    return ranked_blocks[selection - 1]
+        # Check for redundant operations
+        redundant_ops = self._detect_redundant_operations(node)
+        if redundant_ops > 0:
+            adjustment *= max(0.5, 1.0 - (0.1 * redundant_ops))
+
+        # Check for constant conditions in loops
+        if isinstance(node, (ast.For, ast.While)) and self._has_constant_condition(node):
+            # Loop with constant condition might be optimized away or run very few times
+            adjustment *= 0.5
+
+        return adjustment
+
+    def _detect_redundant_operations(self, node):
+        """
+        Detect potentially redundant operations in the code.
+
+        Args:
+            node: AST node to analyze
+
+        Returns:
+            Number of potentially redundant operations
+        """
+        redundant_ops = 0
+
+        # Simple check for repeated calculations
+        # This is a very basic implementation - a real one would track variable assignments
+        calculations = {}
+
+        for subnode in ast.walk(node):
+            if isinstance(subnode, ast.BinOp):
+                # Convert the operation to a string representation
+                op_str = ast.unparse(subnode)
+                if op_str in calculations:
+                    redundant_ops += 1
                 else:
-                    print(f"Please enter a number between 1 and {len(ranked_blocks)}")
-            except ValueError:
-                print("Please enter a valid number")
+                    calculations[op_str] = True
+
+        return redundant_ops
+
+    def _has_constant_condition(self, node):
+        """
+        Check if a loop has a constant condition that might lead to few iterations.
+
+        Args:
+            node: AST node to analyze
+
+        Returns:
+            True if the loop has a constant condition, False otherwise
+        """
+        if isinstance(node, ast.While) and hasattr(node, 'test'):
+            # Check if the condition is a constant (True/False/Number)
+            return isinstance(node.test, (ast.Constant, ast.Num, ast.NameConstant))
+
+        return False
+
+    def validate_intensity_scores(self, code_block):
+        """
+        Validate static intensity scores using runtime profiling.
+        This implements mitigation strategy 1: Combine Static & Dynamic Analysis.
+
+        Args:
+            code_block: Dictionary containing code block information
+
+        Returns:
+            Calibration factor for the intensity score
+        """
+        try:
+            static_score = code_block.get("intensity", 1.0)
+            source_code = code_block.get("source", "")
+
+            # Skip validation if source code is empty
+            if not source_code.strip():
+                return 1.0
+
+            # Dynamic profiling
+            profiler = cProfile.Profile()
+            profiler.enable()
+
+            # Execute the code in a safe environment
+            local_vars = {}
+            exec(source_code, {"__builtins__": __builtins__}, local_vars)
+
+            profiler.disable()
+
+            # Extract runtime metrics
+            s = io.StringIO()
+            stats = pstats.Stats(profiler, stream=s).sort_stats("cumulative")
+            stats.print_stats()
+
+            # Calculate total runtime
+            total_runtime = 0
+            for func, (cc, nc, tt, ct, callers) in stats.stats.items():
+                total_runtime += ct  # Use cumulative time
+
+            # Calculate calibration factor
+            if total_runtime > 0:
+                calibration = static_score / (total_runtime * 1000)  # Convert to milliseconds
+
+                # Store calibration factor for this block
+                block_id = f"{code_block.get('type', 'unknown')}_{code_block.get('lineno', 0)}"
+                self.calibration_factors[block_id] = calibration
+
+                return calibration
+
+            return 1.0
+        except Exception as e:
+            print(f"Error during validation: {e}")
+            return 1.0
