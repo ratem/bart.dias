@@ -1,4 +1,4 @@
-from bdias_code_gen import BDiasCodeGen
+from bdias_profiler import BDiasProfiler
 
 
 class BDiasAssist:
@@ -16,20 +16,53 @@ class BDiasAssist:
        return input("Enter your Python code or a file path, or type 'exit' to quit: ")
 
     def process_code(self, code_or_path):
-      """Parses code or a file content and presents results."""
-      if code_or_path.lower() == 'exit':
-          return False  # Signal to exit the interactive session
+        """Parses code or a file content and presents results."""
+        if code_or_path.lower() == 'exit':
+            return False  # Signal to exit the interactive session
 
-      code = self.read_code(code_or_path) #Try to read from file, or the input is code
-      if code is None:
-        print("No code was analyzed, check your file or code")
+        code = self.read_code(code_or_path)  # Try to read from file, or the input is code
+        if code is None:
+            print("No code was analyzed, check your file or code")
+            return True
+
+        # Parse the code first (needed for both profiling and normal analysis)
+        structured_code = self.parser.parse(code)
+        if structured_code is None:
+            print("No code was analyzed, check for syntax errors")
+            return True
+
+        profile_first = input(
+            "Would you like to profile the code to identify computationally intensive sections? (y/n): ").lower() == 'y'
+
+        if profile_first:
+            profiler = BDiasProfiler(max_results=5)
+            try:
+                # Use the parser that already has the AST
+                ranked_blocks = profiler.profile_code(self.parser, code)
+
+                if not ranked_blocks:
+                    print(
+                        "No significant computationally intensive sections were identified. Proceeding with standard analysis.")
+                    self.display_opportunities(structured_code, code)
+                else:
+                    # Let user select a block to optimize
+                    code_lines = code.splitlines()
+                    selected_block = profiler.get_user_selection(ranked_blocks, code_lines)
+
+                    print(
+                        f"\nAnalyzing {selected_block['type']}: {selected_block['name']} (Lines {selected_block['lineno']}-{selected_block['end_lineno']})")
+
+                    # Filter opportunities to focus on the selected block
+                    self.display_opportunities(structured_code, code, selected_block['lineno'],
+                                               selected_block['end_lineno'])
+            except Exception as e:
+                print(f"Error during profiling: {e}")
+                print("Proceeding with standard analysis.")
+                self.display_opportunities(structured_code, code)
+        else:
+            self.display_opportunities(structured_code, code)
+
         return True
-      structured_code = self.parser.parse(code)
-      if structured_code is None:
-        print("No code was analyzed, check for syntax errors")
-        return True
-      self.display_opportunities(structured_code, code)
-      return True
 
     def read_code(self, code_or_path):
        """Attempts to read code from a file, otherwise return the string."""
@@ -42,7 +75,7 @@ class BDiasAssist:
             print(f"Error reading file: {e}")
             return None
 
-    def display_opportunities(self, structured_code, code):
+    def display_opportunities(self, structured_code, code, start_line=None, end_line=None):
         """Presents parallelization opportunities to the user."""
         has_opportunities = any(structured_code[key] for key in structured_code)
 
@@ -53,6 +86,14 @@ class BDiasAssist:
         print("Potential Parallelization Opportunities:")
 
         suggestions = self.code_generator.generate_suggestions(structured_code)
+
+        # Filter suggestions if a specific block is selected
+        if start_line is not None and end_line is not None:
+            filtered_suggestions = []
+            for suggestion in suggestions:
+                if start_line <= suggestion.get("lineno", 0) <= end_line:
+                    filtered_suggestions.append(suggestion)
+            suggestions = filtered_suggestions
 
         for suggestion in suggestions:
             try:
