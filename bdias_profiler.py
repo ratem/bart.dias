@@ -5,21 +5,16 @@ Functionalities:
 1. Static code analysis to estimate computational intensity
 2. Identification of computationally intensive code blocks (functions, loops, etc.)
 3. Ranking of code blocks based on estimated intensity
-4. Attempt at runtime validation of static intensity scores
 
 Limitations:
-1. Variables and functions declared outside the analyzed block are not correctly handled, leading to errors during
-runtime validation
-2. The static analysis may not accurately reflect actual runtime performance, especially for complex algorithms or
+1. The static analysis may not accurately reflect actual runtime performance, especially for complex algorithms or
 data-dependent operations
-3. The profiler doesn't account for external factors like I/O operations or network calls
-4. It may overestimate the importance of nested loops without considering their actual iteration counts
-5. The profiler doesn't consider optimizations that might be applied by the Python interpreter or underlying libraries
-6. Runtime validation is limited and may not work correctly for all types of code blocks
-7. The profiler doesn't account for memory usage or other resource constraints
-8. It may not accurately assess the parallelization potential of certain algorithms or data structures
-9. The static analysis doesn't consider the impact of input data size on performance
-10. The profiler doesn't account for potential optimizations that could be applied by a human programmer
+2. The profiler doesn't account for external factors like I/O operations or network calls
+3. It may overestimate the importance of nested loops without considering their actual iteration counts
+4. The profiler doesn't consider optimizations that might be applied by the Python interpreter or underlying libraries
+5. The profiler doesn't account for memory usage or other resource constraints
+6. It may not accurately assess the parallelization potential of certain algorithms or data structures
+7. The static analysis doesn't consider the impact of input data size on performance
 
 These limitations mean that while the profiler can provide useful insights, its results should be treated as heuristic
 guidance rather than definitive performance metrics. Users should be aware that manual analysis and testing are still
@@ -27,16 +22,13 @@ crucial for accurate performance optimization.
 """
 
 import ast
-import cProfile
-import pstats
-import io
 from typing import List, Dict, Any
 
 
 class BDiasProfiler:
     """
     Statically profiles Python code to identify computationally intensive sections
-    without executing the code. Includes mitigations for common static analysis pitfalls.
+    without executing the code. Uses heuristic-based analysis only.
     """
 
     def __init__(self, max_results: int = 5):
@@ -47,7 +39,6 @@ class BDiasProfiler:
             max_results: Maximum number of time-consuming sections to display
         """
         self.max_results = max_results
-        self.calibration_factors = {}  # Store calibration factors for different code blocks
 
     def profile_code(self, parser, code: str) -> List[Dict[str, Any]]:
         """
@@ -139,7 +130,6 @@ class BDiasProfiler:
     def _estimate_computational_intensity(self, node):
         """
         Estimate the computational intensity of a code block based on static analysis.
-        Incorporates mitigation strategies for more accurate estimation.
 
         Args:
             node: AST node to analyze
@@ -153,7 +143,7 @@ class BDiasProfiler:
         node_size = len(ast.unparse(node).splitlines())
         intensity *= (1 + 0.1 * node_size)
 
-        # Adjust based on loop nesting (Strategy 2: Context-aware weight adjustment)
+        # Adjust based on loop nesting
         if isinstance(node, (ast.For, ast.While)):
             # Base score for a loop
             intensity *= 10
@@ -179,10 +169,10 @@ class BDiasProfiler:
             if recursive_calls > 0:
                 intensity *= (10 * recursive_calls)
 
-        # Apply context-specific adjustments (Strategy 2)
+        # Apply context-specific adjustments
         intensity *= self._adjust_for_context(node)
 
-        # Apply data flow analysis (Strategy 3: Data Flow Integration)
+        # Apply data flow analysis
         intensity *= self._analyze_data_flow(node)
 
         return intensity
@@ -190,7 +180,6 @@ class BDiasProfiler:
     def _adjust_for_context(self, node):
         """
         Adjust computational intensity based on domain-specific context.
-        This is part of mitigation strategy 2: Context-Aware Weight Adjustment.
 
         Args:
             node: AST node to analyze
@@ -211,8 +200,7 @@ class BDiasProfiler:
                 if hasattr(subnode.func, 'attr'):
                     # Check for numpy operations (potentially GPU-accelerated)
                     if subnode.func.attr in ['dot', 'matmul', 'multiply', 'exp', 'log']:
-                        # Reduce weight for potentially GPU-optimized operations
-                        adjustment *= 0.2
+                        adjustment *= 5.0
                     # Check for other intensive operations
                     elif subnode.func.attr in ['sort', 'filter', 'map']:
                         adjustment *= 2.0
@@ -230,7 +218,6 @@ class BDiasProfiler:
     def _analyze_data_flow(self, node):
         """
         Analyze data flow to detect early exits and redundant operations.
-        This is part of mitigation strategy 3: Data Flow Integration.
 
         Args:
             node: AST node to analyze
@@ -305,57 +292,3 @@ class BDiasProfiler:
             return isinstance(node.test, (ast.Constant, ast.Num, ast.NameConstant))
 
         return False
-
-    def validate_intensity_scores(self, code_block):
-        """
-        Validate static intensity scores using runtime profiling.
-        This implements mitigation strategy 1: Combine Static & Dynamic Analysis.
-
-        Args:
-            code_block: Dictionary containing code block information
-
-        Returns:
-            Calibration factor for the intensity score
-        """
-        try:
-            static_score = code_block.get("intensity", 1.0)
-            source_code = code_block.get("source", "")
-
-            # Skip validation if source code is empty
-            if not source_code.strip():
-                return 1.0
-
-            # Dynamic profiling
-            profiler = cProfile.Profile()
-            profiler.enable()
-
-            # Execute the code in a safe environment
-            local_vars = {}
-            exec(source_code, {"__builtins__": __builtins__}, local_vars)
-
-            profiler.disable()
-
-            # Extract runtime metrics
-            s = io.StringIO()
-            stats = pstats.Stats(profiler, stream=s).sort_stats("cumulative")
-            stats.print_stats()
-
-            # Calculate total runtime
-            total_runtime = 0
-            for func, (cc, nc, tt, ct, callers) in stats.stats.items():
-                total_runtime += ct  # Use cumulative time
-
-            # Calculate calibration factor
-            if total_runtime > 0:
-                calibration = static_score / (total_runtime * 1000)  # Convert to milliseconds
-
-                # Store calibration factor for this block
-                block_id = f"{code_block.get('type', 'unknown')}_{code_block.get('lineno', 0)}"
-                self.calibration_factors[block_id] = calibration
-
-                return calibration
-
-            return 1.0
-        except Exception as e:
-            print(f"Error during validation: {e}")
-            return 1.0
