@@ -25,8 +25,7 @@
 
 ### 4. User Experience Improvements
 
-- Allow users to select which suggestions to implement **PARTIAL**
-- Provide explanations of why certain code isn't parallelizable **SUSPENDED**
+- Allow users to select which suggestions to implement **DONE**
 - Static Profiling **PROTOTYPE**
 
 
@@ -43,8 +42,8 @@
 - Document limitations and best practices **PROTOTYPE**
 
 
-### 7. Intelligence **2.0**
+### 7. Intelligence - **V 2.0**
 
 - Fluid dialogue with the user
-- Generate parallel code based on Patterns 
-- Include performance estimates for parallelized vs. sequential code 
+- Identify and generate parallel code based on Patterns 
+

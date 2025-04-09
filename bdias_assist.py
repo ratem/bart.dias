@@ -109,7 +109,7 @@ class BDiasAssist:
                 print("Please enter a valid number")
 
     def display_opportunities(self, structured_code, code, start_line=None, end_line=None):
-        """Presents parallelization opportunities to the user, optionally focusing on a specific code block."""
+        """Presents parallelization opportunities to the user with side-by-side code comparison."""
         has_opportunities = any(structured_code[key] for key in structured_code)
 
         if not has_opportunities:
@@ -138,36 +138,25 @@ class BDiasAssist:
                 opportunity_type = suggestion.get("opportunity_type", "unknown")
                 explanation_index = suggestion.get("explanation_index", "")
 
-                # Basic loop patterns
+                # Print opportunity type and explanation
                 if opportunity_type in ['loop', 'nested loop']:
                     print(
                         f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index].format(**suggestion)}')
-
-                # While loops
                 elif opportunity_type == 'while':
                     print(f' - Line {suggestion["lineno"]}: This `while` loop may be parallelizable.')
-
-                # Function patterns
                 elif opportunity_type in ['function', 'recursive function definition', 'recursive function',
                                           'function call']:
                     print(
                         f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index].format(**suggestion)}')
-
-                # List comprehension
                 elif opportunity_type == 'list_comprehension':
                     print(f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index]}')
-
-                # Loop and function combination
                 elif opportunity_type == 'loop and function':
                     print(
                         f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index].format(**suggestion)}')
-
-                # Combo patterns
                 elif opportunity_type in ['for_with_recursive_call', 'while_with_for', 'for_in_while',
                                           'for_with_loop_functions', 'while_with_loop_functions']:
                     print(
                         f' - Line {suggestion["lineno"]}: {self.code_generator.EXPLANATIONS[explanation_index].format(**suggestion)}')
-
                 else:
                     print(f" - Line {suggestion['lineno']}: Default explanation for {opportunity_type}")
 
@@ -179,15 +168,43 @@ class BDiasAssist:
                     print(
                         f' Partitioning suggestion: Consider data or task partitioning based on the specific pattern.')
 
-                # Print original code and suggestion
-                print(f' ---Original code:\n {code.splitlines()[suggestion["lineno"] - 1]}')
-                print(' ---Code suggestion:')
-                print(f' {suggestion["code_suggestion"]}')
+                # Get original code lines
+                original_code_lines = code.splitlines()
+                lineno = suggestion["lineno"]
+
+                # Get the original code block (try to extract a reasonable context)
+                original_block = []
+                start_idx = max(0, lineno - 1)  # Start from the identified line
+
+                # Try to get a few lines of context
+                context_lines = 3
+                for i in range(start_idx, min(start_idx + context_lines, len(original_code_lines))):
+                    original_block.append(original_code_lines[i])
+
+                # Get the suggested code
+                suggested_code = suggestion["code_suggestion"].splitlines()
+
+                # Determine the maximum width needed for the original code
+                max_original_width = max(len(line) for line in original_block)
+                # Ensure minimum width for better readability
+                max_original_width = max(max_original_width, 40)
+
+                # Print side-by-side comparison
+                print("\n Side-by-Side Comparison:")
+                print(f" {'Original Code':<{max_original_width}} | {'Parallelized Version'}")
+                print(f" {'-' * max_original_width} | {'-' * 40}")
+
+                # Print the code side by side
+                for i in range(max(len(original_block), len(suggested_code))):
+                    original_line = original_block[i] if i < len(original_block) else ""
+                    suggested_line = suggested_code[i] if i < len(suggested_code) else ""
+                    print(f" {original_line:<{max_original_width}} | {suggested_line}")
 
                 if suggestion.get("llm_suggestion"):
+                    print("\nAdditional suggestions:")
                     print(suggestion["llm_suggestion"])
 
-                print("---")  # Separator between suggestions
+                print("\n---")  # Separator between suggestions
 
             except KeyError as e:
                 print(f"KeyError in display_opportunities: Missing key '{e}' in suggestion: {suggestion}")
