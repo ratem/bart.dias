@@ -1,4 +1,4 @@
-# Bart.dIAs 1.7.0
+# Bart.dIAs 1.6.1
 
 Bart.dIAs is a Python assistant that analyzes code to identify and suggest parallelization opportunities using the multiprocessing module. 
 Based on the current implementation, it offers the following capabilities:
@@ -49,7 +49,7 @@ Bart.dIAs performs basic dependency analysis:
 
 ## Static Profiling
 
-The new static profiling capabilities allow users to:
+Static profiling capabilities allow users to:
 
 - Identify computationally intensive code sections without execution
 - Rank code blocks by estimated computational complexity
@@ -69,9 +69,9 @@ The profiler uses a heuristic to estimate computational intensity:
 
 For each identified opportunity, Bart.dIAs generates:
 
-- Appropriate multiprocessing code templates
+- Multiprocessing code templates
 - Explanations of the parallelization opportunity
-- Partitioning suggestions based on the pattern type
+- Partitioning suggestions
 - Implementation notes and best practices
 
 The tool provides an interactive interface where users can input Python code or file paths, and receive detailed parallelization suggestions with explanations and code examples.

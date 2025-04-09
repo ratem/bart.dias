@@ -1,5 +1,6 @@
 from bdias_profiler import BDiasProfiler
 
+
 class BDiasAssist:
     def __init__(self, parser, code_generator):
         self.parser = parser
@@ -30,6 +31,12 @@ class BDiasAssist:
 
         if profile_option == "2":
             try:
+                # Display profiling limitations message
+                print("\nNOTE: The profiling is based on a heuristic which provides a rough approximation")
+                print("of computational intensity. For more accurate results, a more sophisticated")
+                print("data flow analysis and dynamic runtime profiling would be needed.")
+                print("The current static analysis cannot account for data-dependent performance characteristics.")
+
                 # Use the parser that already has the AST
                 ranked_blocks = self.profiler.profile_code(self.parser, code)
 
@@ -41,18 +48,6 @@ class BDiasAssist:
                     # Let user select a block to optimize
                     code_lines = code.splitlines()
                     selected_block = self.get_user_selection(ranked_blocks, code_lines)
-
-                    # Optionally validate with runtime profiling
-                    validate_option = input(
-                        "Would you like to validate the intensity score with runtime profiling? (y/n): ").lower()
-                    if validate_option == 'y':
-                        try:
-                            calibration = self.profiler.validate_intensity_scores(selected_block)
-                            print(
-                                f"Validation result: Static score is {calibration:.2f}x {'higher' if calibration > 1 else 'lower'} than runtime estimate")
-                        except Exception as e:
-                            print(f"Error during validation: {e}")
-                            print("Continuing with static analysis results.")
 
                     print(
                         f"\nAnalyzing {selected_block['type']}: {selected_block['name']} (Lines {selected_block['lineno']}-{selected_block['end_lineno']})")
@@ -85,7 +80,7 @@ class BDiasAssist:
         """
         Present the ranked code blocks to the user and get their selection.
         """
-        print("\nTop computationally intensive sections in your code:")
+        print("\nTop computationally intensive sections in your code (based on static analysis):")
         for i, block in enumerate(ranked_blocks):
             block_type = block["type"].replace("_", " ").title()
             block_name = block["name"]
