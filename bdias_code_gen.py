@@ -1,6 +1,3 @@
-import multiprocessing as mp
-from functools import partial
-import ast
 
 class BDiasCodeGen:
     """
@@ -54,7 +51,7 @@ class BDiasCodeGen:
                 "func_name": function.get("func_name", ""),
                 "loop_var": function.get("loop_var", ""),
                 "iterable_name": function.get("iterable_name", ""),
-                "code_suggestion": self.suggest_parallel_loop_with_function(function),
+                "code_suggestion": self.suggest_parallel_loop_with_functions(function),
                 "llm_suggestion": ""
             }
 
@@ -145,28 +142,46 @@ class BDiasCodeGen:
 
         return code_suggestion
 
-    def suggest_parallel_loop_with_function(self, function):
-        """Suggests code for parallelizing a loop that calls a function."""
-        function_name = function.get("func_name", "function_name")
-        loop_var = function.get("loop_var", "item")
-        iterable_name = function.get("iterable_name", "iterable")
+    def suggest_parallel_loop_with_functions(self, combo):
+        """Suggests code for parallelizing a loop with function calls that contain loops."""
+        loop_body = combo["body"]
+        loop_var = combo.get("loop_var", "item")
+        iterable_name = combo.get("iterable_name", "iterable")
+        loop_function_calls = combo.get("loop_function_calls", [])
+
+        # Detect indentation of the original loop
+        try:
+            base_indentation = loop_body.index(loop_body.strip()[0])
+        except ValueError:
+            base_indentation = 0
 
         code_suggestion = f"""
-    import multiprocessing as mp
+    {' ' * base_indentation}import multiprocessing as mp
 
-    def process_item_with_function({loop_var}):
-        # Process each item with the function
-        result = {function_name}({loop_var})
-        return result
-
-    if __name__ == '__main__':
-        with mp.Pool() as pool:
-            results = pool.map(process_item_with_function, {iterable_name})
-
-        # Process results as needed
-        # ...
+    {' ' * base_indentation}def process_item_with_nested_functions({loop_var}):
+    {' ' * (base_indentation + 4)}result = []
     """
 
+        # Process each line of the loop body, preserving relative indentation
+        for line in loop_body.splitlines():
+            if line.strip():  # Skip empty lines
+                # Calculate the original indentation of this line relative to the loop
+                line_indentation = len(line) - len(line.lstrip())
+                relative_indent = line_indentation - base_indentation
+
+                # Add the base function indentation (4 spaces) plus the original relative indentation
+                code_suggestion += f"{' ' * (base_indentation + 4 + relative_indent)}{line.lstrip()}\n"
+            else:
+                code_suggestion += f"{' ' * (base_indentation + 4)}\n"  # Empty line with base indentation
+
+        code_suggestion += f"""
+    {' ' * (base_indentation + 4)}return result
+
+    {' ' * base_indentation}if __name__ == '__main__':
+    {' ' * (base_indentation + 4)}with mp.Pool() as pool:
+    {' ' * (base_indentation + 8)}results = pool.map(process_item_with_nested_functions, {iterable_name})
+    {' ' * (base_indentation + 4)}# Process results as needed
+    """
         return code_suggestion
 
     def suggest_parallel_while(self, loop):
@@ -225,6 +240,197 @@ class BDiasCodeGen:
 
         return code_suggestion
 
+    def suggest_parallel_loop(self, loop):
+        """Suggests code for parallelizing a basic loop."""
+        loop_body = loop["body"]
+        loop_var = loop.get("loop_var", "item")
+        iterable_name = loop.get("iterable_name", "iterable")
+
+        # Detect indentation of the original loop
+        try:
+            base_indentation = loop_body.index(loop_body.strip()[0])
+        except ValueError:
+            base_indentation = 0
+
+        code_suggestion = f"""
+    {' ' * base_indentation}import multiprocessing
+
+    {' ' * base_indentation}def process_item({loop_var}):
+    {' ' * (base_indentation + 4)}result = [] #Initialize an empty list to hold the results of each iteration
+    """
+
+        # Process each line of the loop body, preserving relative indentation
+        for line in loop_body.splitlines():
+            if line.strip():  # Skip empty lines
+                # Calculate the original indentation of this line relative to the loop
+                line_indentation = len(line) - len(line.lstrip())
+                relative_indent = line_indentation - base_indentation
+
+                # Add the base function indentation (4 spaces) plus the original relative indentation
+                code_suggestion += f"{' ' * (base_indentation + 4 + relative_indent)}{line.lstrip()}\n"
+            else:
+                code_suggestion += f"{' ' * (base_indentation + 4)}\n"  # Empty line with base indentation
+
+        code_suggestion += f"""
+    {' ' * (base_indentation + 4)}result.append(res) # Assuming the result of an iteration is 'res'
+    {' ' * base_indentation}    return result
+
+    {' ' * base_indentation}if __name__ == '__main__': #Needed the if here!
+    {' ' * base_indentation}    with multiprocessing.Pool() as pool:
+    {' ' * base_indentation}        results = pool.map(process_item, {iterable_name})
+    """
+
+        return code_suggestion
+
+    def suggest_parallel_nested_loop(self, loop):
+        """Suggests code for parallelizing a nested loop."""
+        loop_body = loop["body"]
+        outer_var = loop.get("outer_var", "i")
+        outer_iterable = loop.get("outer_iterable", "range(n)")
+        inner_var = loop.get("inner_var", "j")
+        inner_iterable = loop.get("inner_iterable", "range(m)")
+
+        # Detect indentation of the original loop
+        try:
+            base_indentation = loop_body.index(loop_body.strip()[0])
+        except ValueError:
+            base_indentation = 0
+
+        code_suggestion = f"""
+    {' ' * base_indentation}import multiprocessing as mp
+    {' ' * base_indentation}import itertools
+
+    {' ' * base_indentation}def process_pair(pair):
+    {' ' * (base_indentation + 4)}{outer_var}, {inner_var} = pair
+    {' ' * (base_indentation + 4)}result = []
+    """
+
+        # Process each line of the loop body, preserving relative indentation
+        for line in loop_body.splitlines():
+            if line.strip():  # Skip empty lines
+                # Calculate the original indentation of this line relative to the loop
+                line_indentation = len(line) - len(line.lstrip())
+                relative_indent = line_indentation - base_indentation
+
+                # Add the base function indentation (4 spaces) plus the original relative indentation
+                code_suggestion += f"{' ' * (base_indentation + 4 + relative_indent)}{line.lstrip()}\n"
+            else:
+                code_suggestion += f"{' ' * (base_indentation + 4)}\n"  # Empty line with base indentation
+
+        code_suggestion += f"""
+    {' ' * (base_indentation + 4)}return result
+
+    {' ' * base_indentation}if __name__ == '__main__':
+    {' ' * (base_indentation + 4)}pairs = list(itertools.product({outer_iterable}, {inner_iterable}))
+    {' ' * (base_indentation + 4)}with mp.Pool() as pool:
+    {' ' * (base_indentation + 8)}results = pool.map(process_pair, pairs)
+    {' ' * (base_indentation + 4)}# Process results as needed
+    """
+        return code_suggestion
+
+    def suggest_parallel_recursive_loop(self, combo):
+        """Suggests code for parallelizing a loop with recursive function calls."""
+        loop_body = combo["body"]
+        loop_var = combo.get("loop_var", "item")
+        iterable_name = combo.get("iterable_name", "iterable")
+        recursive_calls = combo.get("recursive_calls", [])
+
+        # Detect base indentation of the original loop
+        try:
+            base_indentation = loop_body.index(loop_body.strip()[0])
+        except ValueError:
+            base_indentation = 0
+
+        code_suggestion = f"""
+    {' ' * base_indentation}import multiprocessing as mp
+    {' ' * base_indentation}from functools import partial
+
+    {' ' * base_indentation}def process_item_with_recursion({loop_var}):
+    {' ' * (base_indentation + 4)}result = []
+    """
+
+        # Process each line of the loop body, preserving relative indentation
+        for line in loop_body.splitlines():
+            if line.strip():  # Skip empty lines
+                # Calculate the original indentation of this line relative to the loop
+                line_indentation = len(line) - len(line.lstrip())
+                relative_indent = max(0, line_indentation - base_indentation)
+
+                # Add the base function indentation (4 spaces) plus the original relative indentation
+                code_suggestion += f"{' ' * (base_indentation + 4 + relative_indent)}{line.lstrip()}\n"
+            else:
+                code_suggestion += f"{' ' * (base_indentation + 4)}\n"  # Empty line with base indentation
+
+        code_suggestion += f"""
+    {' ' * (base_indentation + 4)}return result
+
+    {' ' * base_indentation}if __name__ == '__main__':
+    {' ' * (base_indentation + 4)}with mp.Pool() as pool:
+    {' ' * (base_indentation + 8)}results = pool.map(process_item_with_recursion, {iterable_name})
+    {' ' * (base_indentation + 4)}# Process results as needed
+    """
+        return code_suggestion
+
+    def suggest_parallel_combo_loop(self, combo):
+        """Suggests code for parallelizing a combo of while and for loops."""
+        loop_body = combo["body"]
+        outer_condition = combo.get("outer_condition", "condition")
+        inner_var = combo.get("inner_var", "item")
+        inner_iterable = combo.get("inner_iterable", "items")
+
+        # Detect base indentation of the original loop
+        try:
+            base_indentation = loop_body.index(loop_body.strip()[0])
+        except ValueError:
+            base_indentation = 0
+
+        code_suggestion = f"""
+    {' ' * base_indentation}import multiprocessing as mp
+    {' ' * base_indentation}from queue import Queue
+
+    {' ' * base_indentation}def process_chunk(chunk):
+    {' ' * (base_indentation + 4)}results = []
+    {' ' * (base_indentation + 4)}for {inner_var} in chunk:
+    """
+
+        # Process each line of the loop body, preserving relative indentation
+        for line in loop_body.splitlines():
+            if line.strip():  # Skip empty lines
+                # Calculate the original indentation of this line relative to the loop
+                line_indentation = len(line) - len(line.lstrip())
+                relative_indent = max(0, line_indentation - base_indentation)
+
+                # Add the base function indentation (8 spaces) plus the original relative indentation
+                code_suggestion += f"{' ' * (base_indentation + 8 + relative_indent)}{line.lstrip()}\n"
+            else:
+                code_suggestion += f"{' ' * (base_indentation + 8)}\n"  # Empty line with base indentation
+
+        code_suggestion += f"""
+    {' ' * (base_indentation + 4)}return results
+
+    {' ' * base_indentation}def parallel_combo_loop(condition_func, data_generator):
+    {' ' * (base_indentation + 4)}results = []
+    {' ' * (base_indentation + 4)}with mp.Pool() as pool:
+    {' ' * (base_indentation + 8)}while condition_func():
+    {' ' * (base_indentation + 12)}chunk = data_generator()
+    {' ' * (base_indentation + 12)}if not chunk:
+    {' ' * (base_indentation + 16)}break
+    {' ' * (base_indentation + 12)}chunk_results = pool.apply_async(process_chunk, (chunk,))
+    {' ' * (base_indentation + 12)}results.extend(chunk_results.get())
+    {' ' * (base_indentation + 4)}return results
+
+    {' ' * base_indentation}if __name__ == '__main__':
+    {' ' * (base_indentation + 4)}def check_condition():
+    {' ' * (base_indentation + 8)}return {outer_condition}
+
+    {' ' * (base_indentation + 4)}def generate_data():
+    {' ' * (base_indentation + 8)}# Generate or fetch the next batch of data
+    {' ' * (base_indentation + 8)}return {inner_iterable}
+
+    {' ' * (base_indentation + 4)}final_results = parallel_combo_loop(check_condition, generate_data)
+    {' ' * (base_indentation + 4)}# Process final_results as needed
+    """
+        return code_suggestion
 
     def generate_suggestions(self, structured_code):
         """Generates parallelization suggestions based on the structured code."""
@@ -299,61 +505,6 @@ class BDiasCodeGen:
              "code_suggestion": self.suggest_parallel_listcomp(list_comp)
            }
 
-    def suggest_parallel_loop(self, loop):
-        """Suggests code for parallelizing a basic loop."""
-        loop_body = loop["body"]
-        loop_var = loop.get("loop_var", "item")
-        iterable_name = loop.get("iterable_name", "iterable")
-
-        # Detect indentation of the original loop:
-        try:
-            indentation = loop_body.index(loop_body.strip()[0])  # Get indentation of first line
-        except ValueError:
-            indentation = 0
-
-        code_suggestion = f"""
-    {' ' * indentation}import multiprocessing
-    {' ' * indentation}def process_item({loop_var}):
-    {' ' * (indentation + 4)}result = [] #Initialize an empty list to hold the results of each iteration
-    """
-        for line in loop_body.splitlines():  # Needed .splitlines here!
-            code_suggestion += f"{' ' * (indentation + 4)}{line}\n"  # Indent the loop body
-        code_suggestion += f"""{' ' * (indentation + 4)}result.append(res) # Assuming the result of an iteration is 'res'
-    {' ' * indentation}    return result
-    {' ' * indentation}if __name__ == '__main__': #Needed the if here!
-    {' ' * indentation}    with multiprocessing.Pool() as pool:
-    {' ' * indentation}        results = pool.map(process_item, {iterable_name})
-    """
-        return code_suggestion
-
-
-    def suggest_parallel_nested_loop(self, loop):
-        """Suggests code for parallelizing a nested loop."""
-
-        loop_body = loop["body"]
-        loop_var = loop.get("loop_var", "item")
-        iterable_name = loop.get("iterable_name", "iterable")
-
-        try:
-            indentation = loop_body.index(loop_body.strip()[0])  # Get indentation of first line
-        except ValueError:
-            indentation = 0
-        code_suggestion = f"""
-    {' ' * indentation}import multiprocessing
-    {' ' * indentation}def process_nested_loop({loop_var}):
-    {' ' * (indentation + 4)}result = []  # Initialize result list
-    """
-
-        for line in loop_body.splitlines():  # Needed splitlines
-            code_suggestion += f"{' ' * (indentation + 4)}{line}\n"  # Indent the loop body
-
-        code_suggestion += f"""{' ' * (indentation + 4)}result.append(res)  # Assuming each iteration returns 'res'
-    {' ' * indentation}    return result
-    {' ' * indentation}if __name__ == '__main__': #Needed the if here!
-    {' ' * indentation}   with multiprocessing.Pool() as pool:
-    {' ' * indentation}       results = pool.map(process_nested_loop, {iterable_name})
-    """
-        return code_suggestion
 
     def suggest_parallel_listcomp(self, list_comp):
       """Suggests code for parallelizing a list comprehension."""
@@ -429,113 +580,3 @@ class BDiasCodeGen:
 
         return None
 
-    def suggest_parallel_recursive_loop(self, combo):
-        """Suggests code for parallelizing a loop with recursive function calls."""
-        loop_body = combo["body"]
-        loop_var = combo.get("loop_var", "item")
-        iterable_name = combo.get("iterable_name", "iterable")
-        recursive_calls = combo.get("recursive_calls", [])
-
-        try:
-            indentation = loop_body.index(loop_body.strip()[0])
-        except ValueError:
-            indentation = 0
-
-        code_suggestion = f"""
-    {' ' * indentation}import multiprocessing as mp
-    {' ' * indentation}from functools import partial
-
-    {' ' * indentation}def process_item_with_recursion({loop_var}):
-    {' ' * (indentation + 4)}result = []  # Initialize result list
-    """
-
-        for line in loop_body.splitlines():
-            code_suggestion += f"{' ' * (indentation + 4)}{line}\n"
-
-        code_suggestion += f"""
-    {' ' * indentation}    return result
-
-    {' ' * indentation}if __name__ == '__main__':
-    {' ' * indentation}    with mp.Pool() as pool:
-    {' ' * indentation}        results = pool.map(process_item_with_recursion, {iterable_name})
-    {' ' * indentation}    
-    {' ' * indentation}    # Note: When parallelizing recursive functions, consider:
-    {' ' * indentation}    # 1. Setting an appropriate recursion depth limit
-    {' ' * indentation}    # 2. Using a work-stealing approach for better load balancing
-    {' ' * indentation}    # 3. Implementing memoization to avoid redundant calculations
-    """
-
-        return code_suggestion
-
-    def suggest_parallel_combo_loop(self, combo):
-        """Suggests code for parallelizing a combo of while and for loops."""
-        loop_body = combo["body"]
-
-        try:
-            indentation = loop_body.index(loop_body.strip()[0])
-        except ValueError:
-            indentation = 0
-
-        code_suggestion = f"""
-    {' ' * indentation}import multiprocessing as mp
-
-    {' ' * indentation}# For a combination of while and for loops, consider:
-    {' ' * indentation}# 1. Restructuring the code to separate the loops
-    {' ' * indentation}# 2. Converting the while loop to a for loop if possible
-    {' ' * indentation}# 3. Parallelizing only the inner loops
-
-    {' ' * indentation}def process_chunk(chunk):
-    {' ' * (indentation + 4)}results = []
-    {' ' * (indentation + 4)}# Process the chunk with appropriate logic
-    {' ' * (indentation + 4)}return results
-
-    {' ' * indentation}if __name__ == '__main__':
-    {' ' * indentation}    # Divide work into chunks
-    {' ' * indentation}    chunks = [...]  # Define your chunks based on the problem
-    {' ' * indentation}    
-    {' ' * indentation}    with mp.Pool() as pool:
-    {' ' * indentation}        all_results = pool.map(process_chunk, chunks)
-    """
-
-        return code_suggestion
-
-    def suggest_parallel_loop_with_functions(self, combo):
-        """Suggests code for parallelizing a loop with function calls that contain loops."""
-        loop_body = combo["body"]
-        loop_var = combo.get("loop_var", "item")
-        iterable_name = combo.get("iterable_name", "iterable")
-        loop_function_calls = combo.get("loop_function_calls", [])
-
-        try:
-            indentation = loop_body.index(loop_body.strip()[0])
-        except ValueError:
-            indentation = 0
-
-        code_suggestion = f"""
-    {' ' * indentation}import multiprocessing as mp
-
-    {' ' * indentation}def process_item_with_nested_functions({loop_var}):
-    {' ' * (indentation + 4)}result = []  # Initialize result list
-    """
-
-        for line in loop_body.splitlines():
-            code_suggestion += f"{' ' * (indentation + 4)}{line}\n"
-
-        code_suggestion += f"""
-    {' ' * indentation}    return result
-
-    {' ' * indentation}if __name__ == '__main__':
-    {' ' * indentation}    with mp.Pool() as pool:
-    {' ' * indentation}        results = pool.map(process_item_with_nested_functions, {iterable_name})
-    {' ' * indentation}    
-    {' ' * indentation}    # Note: When parallelizing loops with nested function calls:
-    {' ' * indentation}    # 1. Consider the granularity of parallelization
-    {' ' * indentation}    # 2. Be aware of potential overhead from creating too many processes
-    {' ' * indentation}    # 3. Ensure that the functions called within the loop are thread-safe
-    """
-
-        return code_suggestion
-
-    def get_llm_suggestion(self, prompt):
-        """Makes a call to Gemini for a code suggestion."""
-        return " " # To ensure that it exists!
