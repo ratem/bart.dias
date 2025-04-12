@@ -45,5 +45,6 @@
 ### 7. Intelligence - **V 2.0**
 
 - Fluid dialogue with the user
+- Use of Formal Methods
 - Identify and generate parallel code based on Patterns 
 

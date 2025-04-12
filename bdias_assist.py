@@ -108,6 +108,7 @@ class BDiasAssist:
             except ValueError:
                 print("Please enter a valid number")
 
+
     def display_opportunities(self, structured_code, code, start_line=None, end_line=None):
         """Presents parallelization opportunities to the user with side-by-side code comparison."""
         has_opportunities = any(structured_code[key] for key in structured_code)
@@ -214,6 +215,7 @@ class BDiasAssist:
 
         print("---")  # Final separator
         print("End of suggestions.")
+
 
     def run_interactive_session(self):
         """Runs an interactive session for code analysis."""
