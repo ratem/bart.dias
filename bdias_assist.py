@@ -1,3 +1,25 @@
+"""
+BDiasAssist: User Interaction Module for Bart.dIAs
+
+This module provides the user interface for the Bart.dIAs system. It handles
+user interactions, code input, and presentation of parallelization suggestions.
+
+Features:
+- Runs an interactive session for code analysis
+- Processes user input (code or file paths)
+- Integrates with BDiasParser and BDiasCodeGen for code analysis and suggestion generation
+- Offers options for viewing all parallelization opportunities or focusing on computationally intensive sections
+- Displays parallelization suggestions with side-by-side code comparisons
+- Handles static profiling to identify computationally intensive code sections
+
+Classes:
+- BDiasAssist: Main class for user interaction and result presentation
+
+Dependencies:
+- BDiasProfiler
+"""
+
+
 from bdias_profiler import BDiasProfiler
 
 
@@ -108,7 +130,6 @@ class BDiasAssist:
             except ValueError:
                 print("Please enter a valid number")
 
-
     def display_opportunities(self, structured_code, code, start_line=None, end_line=None):
         """Presents parallelization opportunities to the user with side-by-side code comparison."""
         has_opportunities = any(structured_code[key] for key in structured_code)
@@ -215,7 +236,6 @@ class BDiasAssist:
 
         print("---")  # Final separator
         print("End of suggestions.")
-
 
     def run_interactive_session(self):
         """Runs an interactive session for code analysis."""

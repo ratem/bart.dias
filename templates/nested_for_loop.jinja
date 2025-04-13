@@ -1,0 +1,17 @@
+import multiprocessing as mp
+import itertools
+
+def process_pair(pair):
+    {{ outer_var }}, {{ inner_var }} = pair
+    result = []
+    {% for line in loop_body.splitlines() %}
+    {{ line | indent(4) }}
+    {% endfor %}
+    return result
+
+if __name__ == '__main__':
+    pairs = list(itertools.product({{ outer_iterable }}, {{ inner_iterable }}))
+    with mp.Pool() as pool:
+        results = pool.map(process_pair, pairs)
+    # Process results as needed
+

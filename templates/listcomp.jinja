@@ -1,0 +1,11 @@
+{# listcomp.jinja #}
+import multiprocessing
+
+def process_item({{ loop_var }}):
+    return {{ body }}
+
+if __name__ == '__main__':
+    with multiprocessing.Pool() as pool:
+        results = pool.map(process_item, {{ iterable }})
+    # results now contains what the list comprehension would produce
+

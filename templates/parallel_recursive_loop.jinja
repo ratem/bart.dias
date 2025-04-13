@@ -1,0 +1,19 @@
+{# parallel_recursive_loop.jinja #}
+import multiprocessing as mp
+from functools import partial
+
+def process_item_with_recursion({{ loop_var }}):
+    result = []
+    {{ loop_body | indent(4) }}
+    return result
+
+def parallel_recursive_wrapper({{ loop_var }}):
+    # This wrapper function handles the recursive function call
+    # It isolates each recursive call to run independently
+    return process_item_with_recursion({{ loop_var }})
+
+if __name__ == '__main__':
+    with mp.Pool() as pool:
+        results = pool.map(parallel_recursive_wrapper, {{ iterable_name }})
+    # Process results as needed
+

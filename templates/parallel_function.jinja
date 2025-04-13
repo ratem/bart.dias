@@ -1,0 +1,11 @@
+import multiprocessing as mp
+
+def {{ function_name }}_parallel(args_list):
+    with mp.Pool() as pool:
+        results = pool.starmap({{ function_name }}, args_list)
+    return results
+
+# Example usage:
+# args_list = [(arg1_1, arg1_2, ...), (arg2_1, arg2_2, ...), ...]
+# results = {{ function_name }}_parallel(args_list)
+

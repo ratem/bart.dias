@@ -1,0 +1,14 @@
+{# parallel_loop.jinja #}
+import multiprocessing
+
+def process_item({{ loop_var }}):
+    result = []
+    {% for line in loop_body.splitlines() %}
+    {{ line }}
+    {% endfor %}
+    return result
+
+if __name__ == '__main__':
+    with multiprocessing.Pool() as pool:
+        results = pool.map(process_item, {{ iterable_name }})
+

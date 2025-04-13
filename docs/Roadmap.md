@@ -1,6 +1,6 @@
 # ROADMAP
 
-## Current Stable Version: 1.6.0
+## Current Stable Version: 1.8.0
 
 ### 1. Enhanced Dependency Analysis
 
@@ -31,20 +31,23 @@
 
 ### 5. Code Generation Enhancements 
 
-- Include error handling in generated code
-- Add proper cleanup of resources in generated code
-- Add support for shared memory in generated code when appropriate
+- Use of flexible Code Templates **DONE**
+- Include error handling
+- Add proper cleanup of resources
+- Add support for shared memory when appropriate
 
 
 ### 6. Improved Documentation
 
 - Add more comprehensive documentation for each module
-- Document limitations and best practices **PROTOTYPE**
+- Document limitations **DONE**
 
 
 ### 7. Intelligence - **V 2.0**
 
 - Fluid dialogue with the user
 - Use of Formal Methods
-- Identify and generate parallel code based on Patterns 
+- Use of Contextualized Patterns 
+- Use of platform resources - HPC
+- Dynamic Profiling
 

@@ -1,0 +1,14 @@
+import multiprocessing as mp
+
+def process_item_with_nested_functions({{ loop_var }}):
+    result = []
+    {% for line in loop_body.splitlines() %}
+    {{ line | indent(4) }}
+    {% endfor %}
+    return result
+
+if __name__ == '__main__':
+    with mp.Pool() as pool:
+        results = pool.map(process_item_with_nested_functions, {{ iterable_name }})
+    # Process results as needed
+

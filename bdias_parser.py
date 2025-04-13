@@ -1,4 +1,28 @@
+"""
+BDiasParser: Code Parsing and Analysis Module for Bart.dIAs
+
+This module is responsible for parsing Python code and identifying parallelization
+opportunities. It performs static analysis on the Abstract Syntax Tree (AST) to
+detect various code patterns and analyze dependencies.
+
+Features:
+- Parses Python code using the ast module
+- Identifies parallelizable patterns such as loops, functions, and list comprehensions
+- Performs dependency analysis to determine parallelization safety
+- Detects complex combo patterns like nested loops and recursive function calls
+- Analyzes data flow and cross-function dependencies
+- Provides methods to check if loops, functions, and list comprehensions are parallelizable
+
+Classes:
+- BDiasParser: Main class for parsing and analyzing Python code
+
+Dependencies:
+- ast (Python standard library)
+"""
+
+
 import ast
+
 
 class BDiasParser:
     """
@@ -9,7 +33,6 @@ class BDiasParser:
     def __init__(self):
         """Initializes the parser."""
         pass
-
 
     def _extract_function_data(self, node, tree, function_name):
       """Extract data for functions, loops calling functions, and function calls inside other functions."""
@@ -325,9 +348,12 @@ class BDiasParser:
 
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                    if not any(isinstance(parent, ast.comprehension) and node.id == parent.target.id for parent in
-                               ast.walk(tree)):
+                    if not any(isinstance(parent, ast.comprehension) and
+                               isinstance(node, ast.Name) and
+                               node.id == parent.target.id for parent in ast.walk(tree)):
                         return False
+                    #if not any(isinstance(parent, ast.comprehension) and node.id == parent.target.id for parent in ast.walk(tree)):
+                    #    return False
 
             return True
         except SyntaxError:
