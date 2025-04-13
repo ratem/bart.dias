@@ -1,7 +1,29 @@
+"""
+Bart.dIAs: Main Entry Point
+
+This module serves as the main entry point for the Bart.dIAs system, a Python
+assistant that analyzes code to identify and suggest parallelization opportunities
+using the multiprocessing module.
+
+Features:
+- Initializes and coordinates the main components of Bart.dIAs
+- Sets up explanations and partitioning suggestions for various code patterns
+- Launches the interactive session for code analysis
+
+Components Initialized:
+- BDiasParser: For parsing and analyzing Python code
+- BDiasCodeGen: For generating parallelization suggestions
+- BDiasAssist: For handling user interactions and presenting results
+
+Usage:
+Run this script to start an interactive session with Bart.dIAs.
+"""
+
+
 from bdias_parser import BDiasParser
 from bdias_assist import BDiasAssist
 from bdias_code_gen import BDiasCodeGen
-import subprocess
+
 
 if __name__ == "__main__":
     # Explanations corresponding to the indices used in find_parallelization_opportunities

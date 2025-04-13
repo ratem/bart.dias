@@ -1,25 +1,30 @@
 """
-Summary of the functionalities and limitations of the current BDiasProfiler class:
+BDiasProfiler: Static Code Profiling Module for Bart.dIAs
 
-Functionalities:
-1. Static code analysis to estimate computational intensity
-2. Identification of computationally intensive code blocks (functions, loops, etc.)
-3. Ranking of code blocks based on estimated intensity
+This module provides static profiling capabilities for Python code, identifying
+computationally intensive sections without executing the code.
+
+Features:
+- Performs static analysis to estimate computational intensity of code blocks
+- Identifies and ranks computationally intensive functions, loops, and list comprehensions
+- Uses heuristics to estimate intensity based on code structure and complexity
+- Analyzes nested loops, function calls, and recursive patterns
+- Provides context-aware adjustments for different types of operations
+- Performs basic data flow analysis to detect early exits and redundant operations
+
+Classes:
+- BDiasProfiler: Main class for static code profiling
+
+Dependencies:
+- ast (Python standard library)
+- typing
 
 Limitations:
-1. The static analysis may not accurately reflect actual runtime performance, especially for complex algorithms or
-data-dependent operations
-2. The profiler doesn't account for external factors like I/O operations or network calls
-3. It may overestimate the importance of nested loops without considering their actual iteration counts
-4. The profiler doesn't consider optimizations that might be applied by the Python interpreter or underlying libraries
-5. The profiler doesn't account for memory usage or other resource constraints
-6. It may not accurately assess the parallelization potential of certain algorithms or data structures
-7. The static analysis doesn't consider the impact of input data size on performance
-
-These limitations mean that while the profiler can provide useful insights, its results should be treated as heuristic
-guidance rather than definitive performance metrics. Users should be aware that manual analysis and testing are still
-crucial for accurate performance optimization.
+- Cannot accurately predict runtime performance for all code patterns
+- Does not account for data-dependent performance characteristics
+- Heuristic-based estimates may not perfectly align with actual execution costs
 """
+
 
 import ast
 from typing import List, Dict, Any

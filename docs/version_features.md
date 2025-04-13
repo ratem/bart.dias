@@ -1,6 +1,7 @@
-# Bart.dIAs 1.6.1
+# Bart.dIAs 1.8.0
 
-Bart.dIAs is a Python assistant that analyzes code to identify and suggest parallelization opportunities using the multiprocessing module. 
+Currently, Bart.dIAs is a Python assistant that analyzes code to identify and suggest parallelization opportunities using the multiprocessing module. 
+In the future, besides intelligence, it will provide assistance to for building application based on HPC and GRIPP platform.
 Based on the current implementation, it offers the following capabilities:
 
 ## Core Functionality
@@ -11,6 +12,7 @@ Based on the current implementation, it offers the following capabilities:
 - Generates code suggestions with multiprocessing implementations
 - Provides explanations and partitioning suggestions for each opportunity
 - Offers static profiling to identify computationally intensive code sections
+- Uses Jinja2 templates for generating properly indented code suggestions
 
 
 ## Pattern Recognition
@@ -34,29 +36,32 @@ The assistant can also identify more complex "combo" patterns:
 - While loops containing for loops
 - For loops inside while loops
 - Loops calling functions that themselves contain loops
+- While loops calling functions with loops
 
 
 ## Dependency Analysis
 
-Bart.dIAs performs basic dependency analysis:
+Bart.dIAs performs sophisticated dependency analysis:
 
 - Builds dependency graphs between variables
 - Detects read-after-write dependencies
 - Tracks cross-function dependencies
 - Analyzes recursive call dependencies
 - Identifies loop-carried dependencies
+- Detects complex variable dependencies
+- Analyzes parameter dependencies
 
 
 ## Static Profiling
 
-Static profiling capabilities allow users to:
+The static profiling capabilities allow users to:
 
 - Identify computationally intensive code sections without execution
 - Rank code blocks by estimated computational complexity
 - Focus parallelization efforts on high-impact areas
 - Choose between viewing all opportunities or only the most intensive sections
 
-The profiler uses a heuristic to estimate computational intensity:
+The profiler uses a simple heuristic to estimate computational intensity based on:
 
 - Loop nesting depth analysis
 - Function call frequency assessment
@@ -69,20 +74,34 @@ The profiler uses a heuristic to estimate computational intensity:
 
 For each identified opportunity, Bart.dIAs generates:
 
-- Multiprocessing code templates
+- multiprocessing code templates using Jinja2
+- Side-by-side comparison of original and parallelized code
 - Explanations of the parallelization opportunity
-- Partitioning suggestions
-- Implementation notes and best practices
+- Partitioning suggestions based on the pattern type
+- Basic implementation notes and best practices
 
-The tool provides an interactive interface where users can input Python code or file paths, and receive detailed parallelization suggestions with explanations and code examples.
+
+## Improved Code Generation
+
+This version features improved code generation using Jinja2 templates:
+
+- Properly indented code suggestions that maintain the structure of the original code
+- Template-based approach for consistent and maintainable code generation
+- Specialized templates for different parallelization patterns
+- More accurate representation of the original code structure in suggestions
+
 
 ## Limitations
 
-The current static profiling implementation has some limitations:
-
+Bart.dIAS has limitations:
+a) The current static profiling implementation has some limitations:
 - It cannot accurately predict actual runtime performance for all code patterns
-- The runtime validation feature may encounter errors with variables or functions declared outside the analyzed block
 - Static analysis cannot account for data-dependent performance characteristics
 - The computational intensity estimates are heuristic and may not perfectly align with actual execution costs
+In other words, it needs to implement Dynamic Analysis.
 
+b) It does not use Formal Methods to check and generate code, making it an experimental development.
 
+c) It is based on patterns present in clode blocks, no global checking is performed.
+
+d) It (still) not uses possible platform specific enhancements.

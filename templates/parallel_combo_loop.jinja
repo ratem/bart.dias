@@ -1,0 +1,32 @@
+{# parallel_combo_loop.jinja #}
+import multiprocessing as mp
+from queue import Queue
+
+def process_chunk(chunk):
+    results = []
+    for {{ inner_var }} in chunk:
+        {{ loop_body | indent(8) }}
+    return results
+
+def parallel_combo_loop(condition_func, data_generator):
+    results = []
+    with mp.Pool() as pool:
+        while condition_func():
+            chunk = data_generator()
+            if not chunk:
+                break
+            chunk_results = pool.apply_async(process_chunk, (chunk,))
+            results.extend(chunk_results.get())
+    return results
+
+if __name__ == '__main__':
+    def check_condition():
+        return {{ outer_condition }}
+
+    def generate_data():
+        # Generate or fetch the next batch of data
+        return {{ inner_iterable }}
+
+    final_results = parallel_combo_loop(check_condition, generate_data)
+    # Process final_results as needed
+

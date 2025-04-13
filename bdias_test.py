@@ -253,7 +253,7 @@ def test_function():
     # Tests for Code Generation for Combo Patterns
 
     def test_code_generation_for_with_recursive_call(self):
-        """Test code generation for for loops with recursive function calls."""
+        """Test code generation for loops with recursive function calls."""
         code = """
 def fibonacci(n):
     if n <= 1:
