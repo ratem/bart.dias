@@ -1,6 +1,6 @@
-## Patterns Handled by BDiasCodeGen
+## Block Patterns Handled by BDiasCodeGen
 
-The BDiasCodeGen class has several `handle_XXX` methods that identify different parallelization opportunities:
+The BDiasCodeGen class has several `handle_XXX` methods that identify simple parallelization opportunities:
 
 1. `handle_loop` - Handles:
     - Nested loops
@@ -21,7 +21,7 @@ The BDiasCodeGen class has several `handle_XXX` methods that identify different 
 
 ## Test Coverage Analysis
 
-teste.py includes examples for each of these patterns:
+teste.py includes examples for each of these types of blocks:
 
 ### Basic Loops ✅
 
@@ -175,7 +175,7 @@ def while_with_loop_function(n):
 
 ## Coverage Assessment
 
-The teste.py file includes examples for all the patterns that Bart.dIAs can identify and suggest parallelization for. 
+The test_blocks.py file includes examples forthese simple patterns that Bart.dIAs can identify and suggest parallelization for. 
 Each pattern is represented by at least one example, and many patterns have multiple examples with different variations.
 
 The file includes:
@@ -199,4 +199,4 @@ Additionally, the file includes examples with different types of dependencies:
 
 ## Conclusion
 
-The teste.py file provides coverage for testing all the parallelization opportunities that Bart.dIAs can identify. 
+The test_blocks.py file provides coverage for testing the basic parallelization opportunities that Bart.dIAs can identify. 

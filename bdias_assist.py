@@ -1,33 +1,83 @@
 """
 BDiasAssist: User Interaction Module for Bart.dIAs
 
-This module provides the user interface for the Bart.dIAs system. It handles
+This module provides the user interface for the Bart.dIAs system, handling
 user interactions, code input, and presentation of parallelization suggestions.
+It serves as the main interface between the user and the analysis components
+of the system.
 
 Features:
 - Runs an interactive session for code analysis
 - Processes user input (code or file paths)
 - Integrates with BDiasParser and BDiasCodeGen for code analysis and suggestion generation
-- Offers options for viewing all parallelization opportunities or focusing on computationally intensive sections
+- Offers multiple analysis approaches:
+  1. Block-based parallelization opportunities
+  2. Critical path analysis (DAG-based)
 - Displays parallelization suggestions with side-by-side code comparisons
-- Handles static profiling to identify computationally intensive code sections
+- Provides theoretical metrics and recommendations based on critical path analysis
 
 Classes:
 - BDiasAssist: Main class for user interaction and result presentation
 
 Dependencies:
-- BDiasProfiler
+- BDiasParser: For parsing and analyzing Python code
+- BDiasCodeGen: For generating parallelization suggestions
+- BDiasCriticalPathAnalyzer: For DAG-based critical path analysis
+
+Note: This module integrates the theoretical concepts from Träff's "Lectures on
+Parallel Computing" to provide both practical parallelization suggestions and
+theoretical insights into the parallelism potential of the analyzed code.
 """
-
-
-from bdias_profiler import BDiasProfiler
 
 
 class BDiasAssist:
     def __init__(self, parser, code_generator):
         self.parser = parser
         self.code_generator = code_generator
-        self.profiler = BDiasProfiler(max_results=5)
+
+    def _handle_critical_path_analysis(self, code: str):
+        """Handle critical path analysis workflow without using the profiler."""
+        from bdias_critical_path import BDiasCriticalPathAnalyzer
+
+        # Initialize the analyzer without passing the profiler
+        analyzer = BDiasCriticalPathAnalyzer()
+
+        print("\n=== Critical Path Analysis ===")
+
+        # Analyze the code using the parser but not the profiler
+        results = analyzer.analyze(self.parser, code)
+
+        # Display the theoretical metrics
+        print(f"Total Work (T₁): {results['total_work']:.2f}")
+        print(f"Critical Path Length (T∞): {results['critical_path_length']:.2f}")
+        print(f"Theoretical Parallelism (T₁/T∞): {results['parallelism']:.2f}x")
+        print(f"Amdahl's Law - Sequential Fraction: {results['sequential_fraction']:.2%}")
+        print(f"Amdahl's Law - Max Speedup: {results['amdahl_max_speedup']:.2f}x")
+
+        print("\nTop Bottlenecks:")
+        for i, bn in enumerate(results['bottlenecks'], 1):
+            print(
+                f"{i}. {bn['type'].replace('_', ' ').title()} (Line {bn['lineno']}): Work {bn['work']:.2f}, Span {bn['span']:.2f}")
+            print(f"   Code: {bn['source'][:50]}...")
+
+        # Recommendations based on analysis
+        print("\nRecommendations:")
+        if results['parallelism'] < 2:
+            print("- This code has limited inherent parallelism. Consider restructuring the algorithm.")
+        elif results['sequential_fraction'] > 0.1:
+            print("- The sequential fraction is significant. Focus on parallelizing the bottlenecks identified above.")
+        else:
+            print("- This code has good parallelism potential. Consider using task-based parallelism frameworks.")
+
+        if results['bottlenecks']:
+            print("- The critical path contains high-intensity sequential sections. Consider:")
+            print("  1. Breaking down these sections into smaller, independent tasks")
+            print("  2. Using algorithmic transformations to reduce dependencies")
+            print("  3. Applying domain-specific optimizations to these bottlenecks")
+
+        if input("\nVisualize DAG? (y/n): ").lower() == 'y':
+            analyzer.visualize_dag()
+
 
     def process_code(self, code_or_path):
         """Parses code or a file content and presents results."""
@@ -45,42 +95,15 @@ class BDiasAssist:
             print("No code was analyzed, check for syntax errors")
             return True
 
-        # Ask user if they want to see all opportunities or just the top N most intensive ones
-        profile_option = input("How would you like to view parallelization opportunities?\n"
-                               "1. Show all opportunities\n"
-                               "2. Show only the most computationally intensive sections\n"
-                               "Enter your choice (1/2): ")
-
-        if profile_option == "2":
-            try:
-                # Display profiling limitations message
-                print("\nNOTE: The profiling is based on a heuristic which provides a rough approximation")
-                print("of computational intensity. For more accurate results, a more sophisticated")
-                print("data flow analysis and dynamic runtime profiling would be needed.")
-                print("The current static analysis cannot account for data-dependent performance characteristics.")
-
-                # Use the parser that already has the AST
-                ranked_blocks = self.profiler.profile_code(self.parser, code)
-
-                if not ranked_blocks:
-                    print(
-                        "No significant computationally intensive sections were identified. Proceeding with standard analysis.")
-                    self.display_opportunities(structured_code, code)
-                else:
-                    # Let user select a block to optimize
-                    code_lines = code.splitlines()
-                    selected_block = self.get_user_selection(ranked_blocks, code_lines)
-
-                    print(
-                        f"\nAnalyzing {selected_block['type']}: {selected_block['name']} (Lines {selected_block['lineno']}-{selected_block['end_lineno']})")
-
-                    # Filter opportunities to focus on the selected block
-                    self.display_opportunities(structured_code, code, selected_block['lineno'],
-                                               selected_block['end_lineno'])
-            except Exception as e:
-                print(f"Error during profiling: {e}")
-                print("Proceeding with standard analysis.")
-                self.display_opportunities(structured_code, code)
+        # Ask user for profiling option
+        analysis_option = input(
+            "Choose analysis type:\n"
+            "1. Block-based opportunities\n"
+            "2. Critical Path Analysis\n"
+            "Enter choice (1/2): "
+        )
+        if analysis_option == "2":
+            self._handle_critical_path_analysis(code)
         else:
             # Standard analysis showing all opportunities
             self.display_opportunities(structured_code, code)

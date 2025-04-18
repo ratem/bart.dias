@@ -1,97 +1,169 @@
-# Bart.dIAs - Parallel Coding Assistant
+# Bart.dIAs - Parallel Programming Assistant
 
-[![GitHub](https://img.shields.io/badge/GitHub-ratem/bart.dias-blue?logo=github)](https://github.com/ratem/bart.dias)
-
-Bart.dIAs is a Python assistant designed to analyze Python code and identify opportunities for parallelization using the `multiprocessing` module. 
-It performs static analysis and provides code suggestions to help developers improve the performance of their applications.
+Bart.dIAs is a Python assistant designed to analyze code and identify opportunities for parallelization. It performs static analysis to detect parallelizable patterns and provides concrete suggestions for implementing parallel solutions using Python's multiprocessing module.
 
 ## Features
 
-*   **AST-Based Parsing:** Analyzes Python code using Abstract Syntax Trees (AST).
-*   **Pattern Recognition:** Identifies various parallelizable patterns, including basic loops (`for`, `while`), nested loops, functions (regular and recursive), list comprehensions, and more complex "combo" patterns.
-*   **Dependency Analysis:** Performs static dependency checks (variable dependencies, read-after-write, loop-carried dependencies, cross-function dependencies) to assess the safety of parallelization.
-*   **Static Profiling:** Offers heuristic-based static profiling to estimate the computational intensity of code blocks (functions, loops) and ranks them, helping focus optimization efforts.
-*   **Code Generation:** Generates parallel code suggestions using Python's `multiprocessing` module. Uses Jinja2 templates for properly structured and indented code.
-*   **Side-by-Side Comparison:** Displays the original code alongside the suggested parallelized version for easy comparison.
-*   **Interactive Session:** Provides a command-line interface to analyze code snippets or entire files.
+### Block-Based Analysis
+
+- **Pattern Detection**: Identifies parallelizable patterns in Python code including loops, functions, nested structures, and list comprehensions
+- **Dependency Analysis**: Performs sophisticated data flow analysis to determine which code blocks can be safely parallelized
+- **Side-by-Side Comparison**: Shows original code alongside parallelized versions for easy implementation
+- **Code Generation**: Creates properly indented, template-based code suggestions using Jinja2
+
+
+### Critical Path Analysis
+
+- **DAG-Based Modeling**: Constructs a Directed Acyclic Graph (DAG) representation of code to analyze dependencies
+- **Work-Span Metrics**: Calculates theoretical metrics from parallel computing theory:
+    - Total Work (T₁): Sum of computational costs across all operations
+    - Critical Path Length (T∞): Longest chain of dependent operations
+    - Inherent Parallelism (T₁/T∞): Theoretical upper bound on speedup
+- **Amdahl's Law Integration**: Estimates maximum theoretical speedup based on sequential fraction
+- **Bottleneck Identification**: Pinpoints sequential code sections that limit parallelization potential
+
+
+### Combo Pattern Detection
+
+- **Complex Pattern Recognition**: Detects and analyzes advanced patterns:
+    - While loops containing for loops
+    - For loops with recursive function calls
+    - Nested loops with varying depths
+    - Loops containing function calls that themselves contain loops
+    - For loops inside while loops
+
 
 ## Installation
 
-1.  **Clone the repository:**
-    ```
-    git clone https://github.com/ratem/bart.dias.git
-    cd bart.dias
-    ```
+1. **Clone the repository**:
 
-2.  **Install dependencies:**
-    Make sure you have Python 3 installed. Then, install the required libraries using pip:
-    ```
-    pip install -r requirements.txt
-    ```
+```bash
+git clone https://github.com/ratem/bart.dias.git
+cd bart.dias
+```
+
+2. **Install dependencies**:
+
+```bash
+pip install -r requirements.txt
+```
+
+
+## Requirements
+
+- Python 3.6+
+- Jinja2
+- NetworkX (for DAG visualization)
+- Matplotlib (optional, for visualization)
+
 
 ## Usage
 
-Run the main script from the project's root directory:
+Run the main script to start an interactive session:
 
-```
-
+```bash
 python main.py
-
 ```
 
-Bart.dIAs will start an interactive session:
+
+### Interactive Session
+
+1. **Enter your code**: Either paste Python code directly or provide a path to a Python file
+2. **Choose analysis type**:
+    - **Block-based opportunities**: Identifies specific code blocks that can be parallelized
+    - **Critical Path Analysis**: Performs theoretical analysis of inherent parallelism
+
+### Example Output (Block-Based Analysis)
 
 ```
+Potential Parallelization Opportunities:
+ - Line 25: This 'for' loop iterates over a range of numbers using the loop variable 'i'
+ Partitioning suggestion: Consider data partitioning by dividing the range into chunks for each process
 
-Welcome to Bart.dIAs! I will analyze your Python code to find parallelization opportunities.
-Enter your Python code or a file path, or type 'exit' to quit:
-
+ Side-by-Side Comparison:
+ Original Code                           | Parallelized Version
+ --------------------------------------- | ----------------------------------------
+ for i in range(1000):                   | import multiprocessing
+     result.append(i * i + 3 * i - 2)    | 
+                                         | def process_item(i):
+                                         |     result = []
+                                         |     result.append(i * i + 3 * i - 2)
+                                         |     return result
+                                         | 
+                                         | if __name__ == '__main__':
+                                         |     with multiprocessing.Pool() as pool:
+                                         |         results = pool.map(process_item, range(1000))
 ```
 
-You can either:
-*   Paste a Python code snippet directly.
-*   Enter the path to a Python file (e.g., `teste.py`).
-*   Type `exit` to quit the session.
 
-The assistant will then ask how you want to view opportunities:
+### Example Output (Critical Path Analysis)
 
 ```
+=== Critical Path Analysis ===
 
-How would you like to view parallelization opportunities?
+Total Work (T₁): 1052.50
+Critical Path Length (T∞): 78.50
+Theoretical Parallelism (T₁/T∞): 13.41x
+Amdahl's Law - Sequential Fraction: 7.46%
+Amdahl's Law - Max Speedup: 13.41x
 
-1. Show all opportunities
-2. Show only the most computationally intensive sections
-Enter your choice (1/2):
+Top Bottlenecks:
+1. For Loop (Line 42): Work 320.00, Span 40.00
+   Code: for i in range(n): result = result + i
+2. While Loop (Line 78): Work 210.00, Span 30.00
+   Code: while i &lt; n: result += fibonacci(j % 5)
+3. Function (Line 15): Work 180.00, Span 8.50
+   Code: def recursive_fibonacci(n): if n &lt;= 1: return n
+
+Recommendations:
+- The sequential fraction is significant. Focus on parallelizing the bottlenecks identified above.
+- The critical path contains high-intensity sequential sections. Consider:
+  1. Breaking down these sections into smaller, independent tasks
+  2. Using algorithmic transformations to reduce dependencies
+  3. Applying domain-specific optimizations to these bottlenecks
 ```
 
-Based on your choice, it will present potential parallelization suggestions, explanations, partitioning ideas, and the side-by-side code comparison.
 
-## Dependencies
+## Architecture
 
-*   **Python 3.x**
-*   **Jinja2:** Used for template-based code generation.
-*   **NumPy:** Used in some test cases (`teste.py`), and potentially useful for certain numerical code analyses in the future (though not strictly required by the core analysis modules currently).
+Bart.dIAs consists of several key components:
 
-See `requirements.txt` for details.
+1. **BDiasParser**: Parses Python code using AST analysis to identify parallelizable patterns and analyze dependencies
+2. **BDiasCodeGen**: Generates parallelization suggestions using Jinja2 templates
+3. **BDiasCriticalPathAnalyzer**: Performs theoretical analysis of code's inherent parallelism
+4. **BDiasAssist**: Provides the user interface and coordinates the analysis process
+
+## Theoretical Foundation
+
+The critical path analysis is based on established parallel computing theory from Jesper Larsson Träff's "Lectures on Parallel Computing":
+
+- **Work-Span Model**: Represents computation as a DAG where nodes are tasks and edges are dependencies
+- **Critical Path Analysis**: Identifies the longest path of dependent operations that limits parallel execution
+- **Amdahl's Law**: Calculates maximum theoretical speedup based on sequential fraction
+- **Brent's Theorem**: Relates work, span, and processor count
+
 
 ## Limitations
 
-*   **Static Analysis Only:** Bart.dIAs performs *static* analysis. It does not execute the code, so its understanding is based solely on the code structure.
-*   **Heuristic Profiling:** The static profiler provides a rough *heuristic* estimate of computational intensity. It cannot accurately predict actual runtime performance, which can be data-dependent or affected by external factors (I/O, system load).
-*   **Dependency Analysis Limitations:** While enhanced, static dependency analysis cannot capture all possible runtime dependencies or side effects, especially those involving external libraries or complex object interactions.
-*   **Focus on `multiprocessing`:** Suggestions are currently focused on Python's `multiprocessing` module.
+- **Static Analysis Only**: Analysis is based on code structure, not runtime behavior
+- **Focus on Multiprocessing**: Current code generation targets Python's multiprocessing module
+- **Python-Specific**: Analysis is designed for Python code only
+- **Theoretical Bounds**: Critical path analysis provides theoretical upper bounds that may not be achievable in practice
 
-**Important:** Always carefully review and test the suggested parallel code. Parallelization can introduce complexity (e.g., race conditions, deadlocks) if not done correctly. Bart.dIAs is a tool to *assist* in identifying opportunities, not a fully automatic parallelizer.
 
-## Future Work (Ideas for v2.0)
+## Roadmap
 
-*   Implement high-level parallel pattern detection (Map-Reduce, Pipeline, Stencil, etc.).
-*   Integrate dynamic analysis (profiling actual execution) for more accurate performance insights.
-*   Explore integration with LLMs for more nuanced suggestions or explanations (currently placeholders).
-*   Support for other parallelization libraries (e.g., `concurrent.futures`, `Dask`, `Ray`).
+See the [Roadmap](Roadmap.md) file for planned features and improvements.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to open issues or submit pull requests on the [GitHub repository](https://github.com/ratem/bart.dias).
-```
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Jesper Larsson Träff for the theoretical foundation in "Lectures on Parallel Computing"
 

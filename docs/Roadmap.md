@@ -1,8 +1,10 @@
 # ROADMAP
 
-## Current Stable Version: 1.8.0
+## Current Stable Version: 1.9.0
 
-### 1. Enhanced Dependency Analysis
+### 1. Block Based
+
+### 1.1 Enhanced Dependency Analysis
 
 - Track variable dependencies across function boundaries **DONE**
 - Identify data dependencies in more complex scenarios **DONE**
@@ -10,7 +12,7 @@
 - Implement a proper data flow analysis to detect read-after-write dependencies **DONE**
 
 
-### 2. Combo Detection
+### 1.2. Combo Detection
 
 - While loops containing for loops **DONE**
 - For loops with recursive function calls **DONE**
@@ -18,36 +20,35 @@
 - Loops containing function calls that themselves contain loops **DONE**
 
 
-### 3. Testing and Validation
+### 1.3. Testing and Validation
 
-- Expand the test suite to cover all possible combinations **DONE**
+- Expand the test suite to cover combinations **DONE**
 
-
-### 4. User Experience Improvements
-
-- Allow users to select which suggestions to implement **DONE**
-- Static Profiling **PROTOTYPE**
-
-
-### 5. Code Generation Enhancements 
+### 1.4. Code Generation
 
 - Use of flexible Code Templates **DONE**
+
+### 2. Pattern Based
+
+### 2.1 Improved Background
+- Implementation of the Critical Path Analisys **DONE**
+- Implementation of Amdahl's Law **DONE**
+- Static Profiling: Work Calculation **DONE**
+
+
+### 2.2 Patterns & HDW Resources
+- Use of Patterns 
+- Use of HPC Resources
+
+
+### 2.3 Comprehensive Code Generation
 - Include error handling
 - Add proper cleanup of resources
-- Add support for shared memory when appropriate
 
 
-### 6. Improved Documentation
+### 3. Intelligence & Formalism: **V 2.0**
 
-- Add more comprehensive documentation for each module
-- Document limitations **DONE**
-
-
-### 7. Intelligence - **V 2.0**
-
-- Fluid dialogue with the user
+- Fluid dialogue with the user (LLM)
+- Expanded code generation (LLM)
 - Use of Formal Methods
-- Use of Contextualized Patterns 
-- Use of platform resources - HPC
-- Dynamic Profiling
 
