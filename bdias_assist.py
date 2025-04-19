@@ -36,16 +36,18 @@ class BDiasAssist:
         self.code_generator = code_generator
 
     def _handle_critical_path_analysis(self, code: str):
-        """Handle critical path analysis workflow without using the profiler."""
+        """Handle critical path analysis workflow with pattern suggestions."""
         from bdias_critical_path import BDiasCriticalPathAnalyzer
+        from bdias_pattern_analyzer import BDiasPatternAnalyzer
 
-        # Initialize the analyzer without passing the profiler
-        analyzer = BDiasCriticalPathAnalyzer()
+        # Initialize the analyzers
+        critical_path_analyzer = BDiasCriticalPathAnalyzer()
+        pattern_analyzer = BDiasPatternAnalyzer(self.parser)
 
-        print("\n=== Critical Path Analysis ===")
+        print("\n=== Critical Path Analysis with Pattern Recognition ===")
 
-        # Analyze the code using the parser but not the profiler
-        results = analyzer.analyze(self.parser, code)
+        # Analyze the code using critical path analysis
+        results = critical_path_analyzer.analyze(self.parser, code)
 
         # Display the theoretical metrics
         print(f"Total Work (T₁): {results['total_work']:.2f}")
@@ -54,14 +56,31 @@ class BDiasAssist:
         print(f"Amdahl's Law - Sequential Fraction: {results['sequential_fraction']:.2%}")
         print(f"Amdahl's Law - Max Speedup: {results['amdahl_max_speedup']:.2f}x")
 
-        print("\nTop Bottlenecks:")
+        print("\nCritical Path Bottlenecks with Suggested Patterns:")
         for i, bn in enumerate(results['bottlenecks'], 1):
-            print(
-                f"{i}. {bn['type'].replace('_', ' ').title()} (Line {bn['lineno']}): Work {bn['work']:.2f}, Span {bn['span']:.2f}")
-            print(f"   Code: {bn['source'][:50]}...")
+            print(f"\n{i}. {bn['type'].replace('_', ' ').title()} (Line {bn['lineno']})")
+            print(f"   Work: {bn['work']:.2f}, Span: {bn['span']:.2f}")
+            print(f"   Code: {bn['source'][:50]}..." if len(bn['source']) > 50 else f"   Code: {bn['source']}")
 
-        # Recommendations based on analysis
-        print("\nRecommendations:")
+            # Get pattern suggestions for this bottleneck using the suggest_patterns_for_bottleneck method
+            # This method should be implemented in the BDiasCriticalPathAnalyzer class
+            pattern_suggestions = critical_path_analyzer.suggest_patterns_for_bottleneck(bn)
+
+            if pattern_suggestions:
+                print("\n   Suggested Parallel Patterns:")
+                for j, pattern in enumerate(pattern_suggestions[:3], 1):  # Show top 3 patterns
+                    print(f"   {j}. {pattern['pattern'].upper()} Pattern (Confidence: {pattern['confidence']:.2f})")
+                    print(f"      Rationale: {pattern['rationale']}")
+                    print(f"      Recommended Partitioning: {', '.join(pattern['partitioning'])}")
+                    if 'description' in pattern:
+                        print(f"      Description: {pattern['description']}")
+                    if 'speedup_potential' in pattern:
+                        print(f"      Speedup Potential: {pattern['speedup_potential']}")
+            else:
+                print("\n   No specific parallel patterns identified for this bottleneck.")
+
+        # Provide overall recommendations based on critical path analysis
+        print("\nRecommendations based on Critical Path Analysis:")
         if results['parallelism'] < 2:
             print("- This code has limited inherent parallelism. Consider restructuring the algorithm.")
         elif results['sequential_fraction'] > 0.1:
@@ -75,9 +94,116 @@ class BDiasAssist:
             print("  2. Using algorithmic transformations to reduce dependencies")
             print("  3. Applying domain-specific optimizations to these bottlenecks")
 
+        # Offer visualization option
         if input("\nVisualize DAG? (y/n): ").lower() == 'y':
-            analyzer.visualize_dag()
+            critical_path_analyzer.visualize_dag()
 
+    def _handle_pattern_analysis(self, pattern_analysis, code):
+        """Display pattern analysis results."""
+        print("\n=== Parallel Pattern Analysis ===\n")
+
+        identified_patterns = pattern_analysis.get("identified_patterns", {})
+        if not identified_patterns:
+            print("No specific parallel patterns were identified in the code.")
+            return
+
+        print("Identified Parallel Patterns:")
+        for pattern_name, instances in identified_patterns.items():
+            print(f"\n## {pattern_name.upper()} Pattern")
+            for instance in instances:
+                print(f"  - Line {instance['lineno']}: {instance['type']} (Confidence: {instance['confidence']:.2f})")
+
+            # Display partitioning recommendations
+            partitioning = pattern_analysis["recommended_partitioning"].get(pattern_name, {})
+            print(f"  Recommended Partitioning Strategies: {', '.join(partitioning.get('strategies', []))}")
+            print(f"  Rationale: {partitioning.get('rationale', '')}")
+
+            # Display performance characteristics
+            perf = pattern_analysis["performance_characteristics"].get(pattern_name, {})
+            print(f"  Performance Characteristics:")
+            print(f"    - Work: {perf.get('work', 'Unknown')}")
+            print(f"    - Span: {perf.get('span', 'Unknown')}")
+            print(f"    - Parallelism: {perf.get('parallelism', 'Unknown')}")
+            print(f"    - Communication: {perf.get('communication_overhead', 'Unknown')}")
+            print(f"    - Synchronization: {perf.get('synchronization_points', 'Unknown')}")
+
+    def _handle_integrated_critical_path_pattern_analysis(self, code: str):
+        """
+        Integrate critical path analysis with pattern recognition.
+
+        This method first performs critical path analysis to identify bottlenecks,
+        then applies pattern recognition specifically to those bottlenecks.
+        """
+        from bdias_critical_path import BDiasCriticalPathAnalyzer
+        from bdias_pattern_analyzer import BDiasPatternAnalyzer
+
+        # Initialize the analyzers
+        critical_path_analyzer = BDiasCriticalPathAnalyzer()
+        pattern_analyzer = BDiasPatternAnalyzer(self.parser)
+
+        print("\n=== Critical Path Analysis with Pattern Recognition ===")
+
+        # Step 1: Perform critical path analysis to identify bottlenecks
+        results = critical_path_analyzer.analyze(self.parser, code)
+
+        # Display the theoretical metrics
+        print(f"Total Work (T₁): {results['total_work']:.2f}")
+        print(f"Critical Path Length (T∞): {results['critical_path_length']:.2f}")
+        print(f"Theoretical Parallelism (T₁/T∞): {results['parallelism']:.2f}x")
+        print(f"Amdahl's Law - Sequential Fraction: {results['sequential_fraction']:.2%}")
+        print(f"Amdahl's Law - Max Speedup: {results['amdahl_max_speedup']:.2f}x")
+
+        # Step 2: Analyze bottlenecks and suggest patterns for each one
+        print("\nCritical Path Bottlenecks with Suggested Patterns:")
+
+        if not results['bottlenecks']:
+            print("No significant bottlenecks identified in the critical path.")
+        else:
+            for i, bottleneck in enumerate(results['bottlenecks'], 1):
+                print(f"\n{i}. {bottleneck['type'].replace('_', ' ').title()} (Line {bottleneck['lineno']})")
+                print(f"   Work: {bottleneck['work']:.2f}, Span: {bottleneck['span']:.2f}")
+                print(f"   Code: {bottleneck['source'][:50]}..." if len(
+                    bottleneck['source']) > 50 else f"   Code: {bottleneck['source']}")
+
+                # Parse the bottleneck code to analyze for patterns
+                try:
+                    # CHANGE HERE: Use critical_path_analyzer instead of pattern_analyzer
+                    pattern_suggestions = critical_path_analyzer.suggest_patterns_for_bottleneck(bottleneck)
+
+                    if pattern_suggestions:
+                        print("\n   Suggested Parallel Patterns:")
+                        for j, pattern in enumerate(pattern_suggestions[:3], 1):  # Show top 3 patterns
+                            print(
+                                f"   {j}. {pattern['pattern'].upper()} Pattern (Confidence: {pattern['confidence']:.2f})")
+                            print(f"      Rationale: {pattern['rationale']}")
+                            print(f"      Recommended Partitioning: {', '.join(pattern['partitioning'])}")
+                            if 'description' in pattern:
+                                print(f"      Description: {pattern['description']}")
+                            if 'speedup_potential' in pattern:
+                                print(f"      Speedup Potential: {pattern['speedup_potential']}")
+                    else:
+                        print("\n   No specific parallel patterns identified for this bottleneck.")
+                except SyntaxError:
+                    print("\n   Unable to analyze bottleneck code structure for pattern recognition.")
+
+        # Step 3: Provide overall recommendations based on critical path analysis
+        print("\nRecommendations based on Critical Path Analysis:")
+        if results['parallelism'] < 2:
+            print("- This code has limited inherent parallelism. Consider restructuring the algorithm.")
+        elif results['sequential_fraction'] > 0.1:
+            print("- The sequential fraction is significant. Focus on parallelizing the bottlenecks identified above.")
+        else:
+            print("- This code has good parallelism potential. Consider using task-based parallelism frameworks.")
+
+        if results['bottlenecks']:
+            print("- The critical path contains high-intensity sequential sections. Consider:")
+            print("  1. Breaking down these sections into smaller, independent tasks")
+            print("  2. Using algorithmic transformations to reduce dependencies")
+            print("  3. Applying domain-specific optimizations to these bottlenecks")
+
+        # Offer visualization option
+        if input("\nVisualize DAG? (y/n): ").lower() == 'y':
+            critical_path_analyzer.visualize_dag()
 
     def process_code(self, code_or_path):
         """Parses code or a file content and presents results."""
@@ -89,26 +215,37 @@ class BDiasAssist:
             print("No code was analyzed, check your file or code")
             return True
 
-        # Parse the code first (needed for both profiling and normal analysis)
+        # Parse the code first (needed for all analysis types)
         structured_code = self.parser.parse(code)
         if structured_code is None:
             print("No code was analyzed, check for syntax errors")
             return True
 
-        # Ask user for profiling option
-        analysis_option = input(
-            "Choose analysis type:\n"
-            "1. Block-based opportunities\n"
-            "2. Critical Path Analysis\n"
-            "Enter choice (1/2): "
-        )
-        if analysis_option == "2":
+        # Ask user which analysis approach they want to use
+        analysis_option = input("How would you like to analyze the code?\n"
+                                "1. Show Block-Based parallelization opportunities\n"
+                                "2. Perform critical path analysis (DAG-Based)\n"
+                                "3. Identify parallel patterns for critical path bottlenecks\n"
+                                "Enter your choice (1/2/3): ")
+
+        if analysis_option == "1":
+            # Standard block-based analysis showing all opportunities
+            self.display_opportunities(structured_code, code)
+
+        elif analysis_option == "2":
+            # Critical path analysis only
             self._handle_critical_path_analysis(code)
+
+        elif analysis_option == "3":
+            # Integrated critical path and pattern recognition
+            self._handle_integrated_critical_path_pattern_analysis(code)
+
         else:
-            # Standard analysis showing all opportunities
+            print("Invalid option. Proceeding with standard analysis.")
             self.display_opportunities(structured_code, code)
 
         return True
+
 
     def read_code(self, code_or_path):
         """Reads code from a file or returns the input if it's a code snippet."""
