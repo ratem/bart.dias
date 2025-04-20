@@ -1,10 +1,10 @@
 # ROADMAP
 
-## Current Stable Version: 1.9.0
+## Current Stable Version: 0.9.0
 
-### 1. Block Based
+### 1. Block Based Functionality
 
-### 1.1 Enhanced Dependency Analysis
+### 1.1 Dependency Analysis
 
 - Track variable dependencies across function boundaries **DONE**
 - Identify data dependencies in more complex scenarios **DONE**
@@ -22,26 +22,32 @@
 
 ### 1.3. Testing and Validation
 
-- Expand the test suite to cover combinations **DONE**
+- Test suite to cover all block-based patterns **DONE**
 
 ### 1.4. Code Generation
 
-- Use of flexible Code Templates **DONE**
+- Use of Code Templates **DONE**
 
-### 2. Pattern Based
+### 2. Pattern Based Functionality
 
-### 2.1 Improved Background
-- Implementation of the Critical Path Analisys **DONE**
+### 2.1 Static Profiling & Code Generation
 - Implementation of Amdahl's Law **DONE**
-- Static Profiling: Work Calculation **DONE**
+- Implementation of the Critical Path Analisys **DONE**
+- Heuristics for Domain Partition Patterns **DONE**
+- Heuristics for Parallel Programming Patterns **DONE**
+- Templates for Code Generation
+- Decision Tree for Domain Partition
+- Decision Tree for Programming Patterns
 
-
-### 2.2 Patterns & HDW Resources
-- Use of Patterns 
+### 2.2 Platform Resources
 - Use of HPC Resources
+- Dynamic Profiling:
+	- Code generation 
+	- Output analysis
 
 
-### 2.3 Comprehensive Code Generation
+### 2.3 Comprehensive Code Generation & Testing
+- Expand Real-World Scenarios testing
 - Include error handling
 - Add proper cleanup of resources
 
@@ -50,5 +56,5 @@
 
 - Fluid dialogue with the user (LLM)
 - Expanded code generation (LLM)
-- Use of Formal Methods
+- Comprehensive use of Formal Methods
 

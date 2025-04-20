@@ -3,8 +3,8 @@ BDiasPatternAnalyzer: Parallel Pattern Recognition Module for Bart.dIAs
 
 This module implements a Pattern Characteristic Matrix that maps computational
 structures to specific parallel patterns such as Pipeline, Stencil, Master-Worker,
-etc. It builds upon the basic pattern recognition capabilities of BDiasParser
-to identify higher-level parallel programming patterns.
+etc. It focuses exclusively on pattern recognition and matching, without
+overlapping with critical path analysis responsibilities.
 
 Features:
 - Maps computational structures to known parallel patterns
@@ -24,11 +24,13 @@ from typing import Dict, List, Set, Tuple, Any, Optional
 
 class BDiasPatternAnalyzer:
     """
-    Analyzes code structures identified by BDiasParser to recognize higher-level
-    parallel programming patterns and their characteristics.
+    Analyzes code structures to recognize higher-level parallel programming patterns.
 
     The Pattern Characteristic Matrix maps computational structures to specific
     parallel patterns and provides information about their properties.
+
+    This class focuses exclusively on pattern recognition and matching, without
+    overlapping with critical path analysis responsibilities.
     """
 
     def __init__(self, parser):
@@ -397,6 +399,192 @@ class BDiasPatternAnalyzer:
 
         return results
 
+    def suggest_patterns_for_code_block(self, code_block: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Analyze a specific code block and suggest appropriate parallel patterns.
+
+        This method is designed to be used by the integration layer to get pattern
+        suggestions for a specific code block, such as a bottleneck identified
+        in critical path analysis.
+
+        Args:
+            code_block: Dictionary containing code block information
+
+        Returns:
+            List of suggested patterns with confidence scores and rationales
+        """
+        suggested_patterns = []
+
+        # Extract code block characteristics
+        node_type = code_block.get('type', '')
+        source_code = code_block.get('source', '')
+
+        # Parse the code block to analyze its structure
+        try:
+            block_node = ast.parse(source_code)
+
+            # Analyze computational structure
+            has_nested_loops = self._has_nested_loops(block_node)
+            has_neighbor_access = self._has_neighbor_access(block_node)
+            has_reduction_pattern = self._has_reduction_pattern(block_node)
+            has_producer_consumer_pattern = self._has_producer_consumer_pattern(block_node)
+            has_independent_tasks = self._has_independent_tasks(block_node)
+            has_divide_combine_pattern = self._has_divide_combine_pattern(block_node)
+            has_distribution_collection_pattern = self._has_distribution_collection_pattern(block_node)
+            has_task_distribution = self._has_task_distribution(block_node)
+            has_accumulation_pattern = self._has_accumulation_pattern(block_node)
+            is_independent_loop = self._is_independent_loop(block_node)
+
+            # Match with patterns from the Pattern Characteristic Matrix
+            # Map pattern
+            if is_independent_loop or (node_type == 'for_loop' and not has_nested_loops and not has_reduction_pattern):
+                suggested_patterns.append({
+                    "pattern": "map",
+                    "confidence": 0.9 if is_independent_loop else 0.7,
+                    "rationale": "The code block contains independent operations that can be executed in parallel.",
+                    "partitioning": ["SDP", "SIP", "horizontal"],
+                    "description": "Apply the same operation independently to each element in a dataset.",
+                    "speedup_potential": "Linear (O(p)) with sufficient data parallelism."
+                })
+
+            # Stencil pattern
+            if has_nested_loops and has_neighbor_access:
+                suggested_patterns.append({
+                    "pattern": "stencil",
+                    "confidence": 0.85,
+                    "rationale": "The code block contains nested loops with neighbor access patterns.",
+                    "partitioning": ["SDP", "horizontal"],
+                    "description": "Update array elements based on neighboring elements.",
+                    "speedup_potential": "O(n) for 2D problems with n² elements."
+                })
+
+            # Pipeline pattern
+            if has_producer_consumer_pattern:
+                suggested_patterns.append({
+                    "pattern": "pipeline",
+                    "confidence": 0.8,
+                    "rationale": "The code block shows a producer-consumer pattern with data flowing between stages.",
+                    "partitioning": ["TDP", "TIP"],
+                    "description": "Divide a task into a series of stages, with data flowing through stages.",
+                    "speedup_potential": "Limited by the slowest stage, up to O(s) for s stages."
+                })
+
+            # Reduction pattern
+            if has_reduction_pattern or has_accumulation_pattern:
+                suggested_patterns.append({
+                    "pattern": "reduction",
+                    "confidence": 0.85,
+                    "rationale": "The code block accumulates results, suitable for parallel reduction.",
+                    "partitioning": ["SDP", "SIP"],
+                    "description": "Combine multiple elements into a single result using an associative operation.",
+                    "speedup_potential": "O(log n) critical path with O(n/log n) parallelism."
+                })
+
+            # Divide and Conquer pattern
+            if has_divide_combine_pattern:
+                suggested_patterns.append({
+                    "pattern": "divide_conquer",
+                    "confidence": 0.85,
+                    "rationale": "The code block recursively divides work and combines results.",
+                    "partitioning": ["SIP", "horizontal"],
+                    "description": "Recursively break down a problem into smaller subproblems.",
+                    "speedup_potential": "O(n) for many problems with O(n log n) work."
+                })
+
+            # Fork-Join pattern
+            if has_independent_tasks:
+                suggested_patterns.append({
+                    "pattern": "fork_join",
+                    "confidence": 0.75,
+                    "rationale": "The code block creates independent tasks that can be executed in parallel.",
+                    "partitioning": ["SIP", "horizontal"],
+                    "description": "Split a task into subtasks, execute them in parallel, then join results.",
+                    "speedup_potential": "Limited by the critical path length."
+                })
+
+            # Master-Worker pattern
+            if has_task_distribution:
+                suggested_patterns.append({
+                    "pattern": "master_worker",
+                    "confidence": 0.7,
+                    "rationale": "The code block distributes independent tasks to workers.",
+                    "partitioning": ["SIP", "horizontal", "hash"],
+                    "description": "A master process distributes tasks to worker processes.",
+                    "speedup_potential": "Near-linear with good load balancing."
+                })
+
+            # Scatter-Gather pattern
+            if has_distribution_collection_pattern:
+                suggested_patterns.append({
+                    "pattern": "scatter_gather",
+                    "confidence": 0.7,
+                    "rationale": "The code block distributes data for parallel processing and then collects results.",
+                    "partitioning": ["SDP", "horizontal", "hash"],
+                    "description": "Distribute data across processes, process independently, then collect results.",
+                    "speedup_potential": "Near-linear with minimal communication overhead."
+                })
+
+            # If no specific pattern was identified, suggest a generic approach
+            if not suggested_patterns:
+                # Check if it might be a sequential bottleneck
+                if "while" in source_code.lower() and "for" in source_code.lower():
+                    suggested_patterns.append({
+                        "pattern": "pipeline",
+                        "confidence": 0.5,
+                        "rationale": "The code block contains nested loops that might benefit from pipelining.",
+                        "partitioning": ["TDP", "TIP"],
+                        "description": "Transform sequential stages into a pipeline.",
+                        "speedup_potential": "Limited by dependencies between iterations."
+                    })
+                else:
+                    suggested_patterns.append({
+                        "pattern": "task_parallelism",
+                        "confidence": 0.4,
+                        "rationale": "Consider restructuring the code to expose more parallelism.",
+                        "partitioning": ["SIP"],
+                        "description": "Identify independent tasks that can be executed concurrently.",
+                        "speedup_potential": "Depends on the amount of parallelism exposed."
+                    })
+
+            # Sort by confidence
+            suggested_patterns.sort(key=lambda x: x["confidence"], reverse=True)
+
+        except SyntaxError:
+            # If parsing fails, return a generic suggestion
+            suggested_patterns.append({
+                "pattern": "unknown",
+                "confidence": 0.3,
+                "rationale": "Unable to parse code structure for detailed analysis.",
+                "partitioning": ["SDP"]
+            })
+
+        return suggested_patterns
+
+    def get_pattern_characteristics(self, pattern_name: str) -> Dict[str, Any]:
+        """
+        Get the characteristics of a specific pattern from the matrix.
+
+        Args:
+            pattern_name: Name of the pattern
+
+        Returns:
+            Dictionary containing pattern characteristics
+        """
+        return self.pattern_matrix.get(pattern_name, {})
+
+    def suggest_partitioning_strategy(self, pattern_name: str) -> List[str]:
+        """
+        Suggest appropriate partitioning strategies for a specific pattern.
+
+        Args:
+            pattern_name: Name of the pattern
+
+        Returns:
+            List of recommended partitioning strategies
+        """
+        pattern_info = self.pattern_matrix.get(pattern_name, {})
+        return pattern_info.get("suitable_partitioning", [])
+
     # Pattern detection helper methods
     def _is_independent_loop(self, loop: Dict[str, Any]) -> bool:
         """Check if a loop has independent iterations."""
@@ -446,27 +634,29 @@ class BDiasPatternAnalyzer:
         # This is a simplified placeholder
         return "combo" in combo.get("type", "")
 
-    def get_pattern_characteristics(self, pattern_name: str) -> Dict[str, Any]:
-        """
-        Get the characteristics of a specific pattern from the matrix.
+    # Additional pattern detection helpers for AST-based analysis
+    def _has_nested_loops(self, node):
+        """Check if a node contains nested loops."""
+        outer_loops = []
+        for subnode in ast.walk(node):
+            if isinstance(subnode, (ast.For, ast.While)):
+                outer_loops.append(subnode)
 
-        Args:
-            pattern_name: Name of the pattern
+        for loop in outer_loops:
+            for subnode in ast.walk(loop):
+                if isinstance(subnode, (ast.For, ast.While)) and subnode != loop:
+                    return True
+        return False
 
-        Returns:
-            Dictionary containing pattern characteristics
-        """
-        return self.pattern_matrix.get(pattern_name, {})
-
-    def suggest_partitioning_strategy(self, pattern_name: str) -> List[str]:
-        """
-        Suggest appropriate partitioning strategies for a specific pattern.
-
-        Args:
-            pattern_name: Name of the pattern
-
-        Returns:
-            List of recommended partitioning strategies
-        """
-        pattern_info = self.pattern_matrix.get(pattern_name, {})
-        return pattern_info.get("suitable_partitioning", [])
+    def _has_reduction_pattern(self, node):
+        """Check if a node contains a reduction pattern (accumulation)."""
+        for subnode in ast.walk(node):
+            if isinstance(subnode, ast.AugAssign):  # +=, *=, etc.
+                return True
+            elif isinstance(subnode, ast.Assign):
+                if isinstance(subnode.targets[0], ast.Name) and \
+                        isinstance(subnode.value, ast.BinOp) and \
+                        isinstance(subnode.value.left, ast.Name) and \
+                        subnode.targets[0].id == subnode.value.left.id:
+                    return True  # x = x + ...
+        return False
