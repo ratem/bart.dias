@@ -5,7 +5,7 @@ from bdias_code_gen import BDiasCodeGen
 from bdias_assist import BDiasAssist
 
 
-class BDiasTest(unittest.TestCase):
+class BDiasBlocksTest(unittest.TestCase):
     def setUp(self):
         # Initialize the parser for each test
         self.parser = BDiasParser()
