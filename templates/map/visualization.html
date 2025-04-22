@@ -1,0 +1,131 @@
+<html>
+<head>
+    <title>Map Pattern Transformation</title>
+    <style>
+        .container {
+            display: flex;
+            width: 100%;
+        }
+        .code-block {
+            width: 48%;
+            margin: 1%;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f5f5f5;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .pattern-info {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #e6f7ff;
+            border-left: 4px solid #1890ff;
+        }
+        .highlight {
+            background-color: #ffeb3b;
+        }
+        .map-visualization {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        .data-elements {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .data-element {
+            width: 30px;
+            height: 30px;
+            margin: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 5px;
+            color: #000;
+        }
+        .processors {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .processor {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <h1>Map Pattern Transformation</h1>
+
+    <div class="pattern-info">
+        <h2>{{ pattern_name }} Pattern</h2>
+        <p>{{ pattern_description }}</p>
+        <p><strong>Partitioning Strategy:</strong> {{ partitioning_strategy }}</p>
+    </div>
+
+    <div class="container">
+        <div class="code-block">
+            <h3>Original Code</h3>
+            {{ original_code }}
+        </div>
+
+        <div class="code-block">
+            <h3>Parallelized Code</h3>
+            {{ transformed_code }}
+        </div>
+    </div>
+
+    <div class="map-visualization">
+        <h3>Map Pattern Visualization</h3>
+        <p>The Map pattern applies the same operation to each element of a dataset in parallel.</p>
+
+        <div class="data-elements">
+            {% for i in range(data_size) %}
+            <div class="data-element" style="background-color: hsl({{ (i / data_size * 360)|int }}, 70%, 70%);">
+                {{ i }}
+            </div>
+            {% endfor %}
+        </div>
+
+        <h3>Processor Assignment</h3>
+        <div class="processors">
+            {% for p, start, end in processor_ranges %}
+            <div class="processor">
+                <h4>Processor {{ p }}</h4>
+                <div class="assigned-elements">
+                    {% for i in range(start, end) %}
+                    <div class="data-element" style="background-color: hsl({{ (i / data_size * 360)|int }}, 70%, 70%);">
+                        {{ i }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="pattern-info">
+        <h3>Transformation Explanation</h3>
+        <p>{{ explanation }}</p>
+
+        <h3>Implementation Details</h3>
+        <p>This parallelization uses Python's multiprocessing module to distribute the work across {{ processor_count }} processors. Each processor handles approximately {{ elements_per_processor }} elements.</p>
+
+        <h3>Performance Considerations</h3>
+        <p>The theoretical speedup is proportional to the number of processors, with a maximum speedup of {{ processor_count }}x for this implementation. Actual performance may vary based on overhead and the specific characteristics of the computation.</p>
+
+        <h3>Usage Instructions</h3>
+        <p>To use this parallelized code:</p>
+        <ol>
+            <li>Replace the original function with the parallelized version</li>
+            <li>Ensure the multiprocessing module is imported</li>
+            <li>For class methods, make sure to create an instance before calling the parallel method</li>
+        </ol>
+    </div>
+</body>
+</html>

@@ -1,0 +1,38 @@
+import multiprocessing
+
+def {{ func_name }}_worker({{ ", ".join(func_args) }}):
+    {{ body | indent(4) }}
+
+def {{ func_name }}_parallel({{ ", ".join(func_args) }}):
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Process data in parallel
+        {% if is_class_method is defined and is_class_method %}
+        # For class methods, use the second argument as data if available
+        {% if data_arg is defined %}
+        results = pool.map({{ func_name }}_worker, {{ data_arg }})
+        {% else %}
+        # Fallback to a default if no suitable data argument is available
+        results = pool.map({{ func_name }}_worker, [])
+        {% endif %}
+        {% else %}
+        # For regular functions, use the first argument
+        results = pool.map({{ func_name }}_worker, {{ func_args[0] if func_args else "data" }})
+        {% endif %}
+
+    return results
+
+if __name__ == '__main__':
+    # Example usage
+    {% if is_class_method is defined and is_class_method %}
+    # For class methods, create an instance first
+    instance = SomeClass()
+    {% if data_arg is defined %}
+    result = instance.{{ func_name }}_parallel({{ data_arg }})
+    {% else %}
+    result = instance.{{ func_name }}_parallel([])
+    {% endif %}
+    {% else %}
+    # For regular functions
+    result = {{ func_name }}_parallel({{ func_args[0] if func_args else "data" }})
+    {% endif %}

@@ -1,0 +1,56 @@
+<html>
+<head>
+    <title>Parallel Code Transformation</title>
+    <style>
+        .container {
+            display: flex;
+            width: 100%;
+        }
+        .code-block {
+            width: 48%;
+            margin: 1%;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f5f5f5;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .pattern-info {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #e6f7ff;
+            border-left: 4px solid #1890ff;
+        }
+        .highlight {
+            background-color: #ffeb3b;
+        }
+    </style>
+</head>
+<body>
+    <h1>Parallel Code Transformation</h1>
+
+    <div class="pattern-info">
+        <h2>{{ pattern_name }} Pattern</h2>
+        <p>{{ pattern_description }}</p>
+        <p><strong>Partitioning Strategy:</strong> {{ partitioning_strategy }}</p>
+    </div>
+
+    <div class="container">
+        <div class="code-block">
+            <h3>Original Code</h3>
+            {{ original_code }}
+        </div>
+
+        <div class="code-block">
+            <h3>Parallelized Code</h3>
+            {{ transformed_code }}
+        </div>
+    </div>
+
+    <div class="pattern-info">
+        <h3>Transformation Explanation</h3>
+        <p>{{ explanation }}</p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,44 @@
+import multiprocessing
+import itertools
+
+def {{ func_name }}_worker({{ ", ".join(func_args) }}):
+    {{ body | indent(4) }}
+
+def {{ func_name }}_parallel({{ ", ".join(func_args) }}):
+    # Determine number of processors
+    num_procs = multiprocessing.cpu_count()
+
+    {% if is_class_method is defined and is_class_method %}
+    # For class methods, use the second argument as data if available
+    {% if func_args|length > 1 %}
+    data = {{ func_args[1] }}
+    {% else %}
+    # Fallback to a default if no suitable data argument is available
+    data = []
+    {% endif %}
+    {% else %}
+    # For regular functions, use the first argument
+    data = {{ func_args[0] if func_args else "data" }}
+    {% endif %}
+
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Process data in parallel using spatial instruction partitioning
+        results = pool.map({{ func_name }}_worker, data)
+
+    return results
+
+if __name__ == '__main__':
+    # Example usage
+    {% if is_class_method is defined and is_class_method %}
+    # For class methods, create an instance first
+    instance = SomeClass()
+    {% if func_args|length > 1 %}
+    result = instance.{{ func_name }}_parallel({{ func_args[1] }})
+    {% else %}
+    result = instance.{{ func_name }}_parallel([])
+    {% endif %}
+    {% else %}
+    # For regular functions
+    result = {{ func_name }}_parallel({{ func_args[0] if func_args else "data" }})
+    {% endif %}

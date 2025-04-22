@@ -190,6 +190,15 @@ class BDiasAssist:
 
                                 # Add to pattern types for implementation guidance
                                 pattern_types.append(pattern_name)
+
+                                # Ask if user wants to see parallelized code
+                                if input(
+                                        f"\n   Generate parallelized code for {pattern_name.upper()} pattern? (y/n): ").lower() == 'y':
+                                    self._handle_pattern_based_code_generation(
+                                        bottleneck,
+                                        pattern_name,
+                                        partitioning.get('strategies', [])
+                                    )
                     else:
                         print("\n   No specific parallel patterns identified for this bottleneck.")
                 except Exception as e:
@@ -208,6 +217,34 @@ class BDiasAssist:
         # Offer visualization option
         if input("\nVisualize DAG? (y/n): ").lower() == 'y':
             critical_path_analyzer.visualize_dag()
+
+    def _handle_pattern_based_code_generation(self, bottleneck, pattern, partitioning_strategy):
+        from bdias_pattern_codegen import generate_parallel_code
+        from bdias_pattern_presenter import present_transformation
+
+        # Generate parallel code
+        original_code, transformed_code, context = generate_parallel_code(
+            bottleneck,
+            pattern,
+            partitioning_strategy
+        )
+
+        # Present the transformation
+        pattern_info = {
+            'pattern': pattern,
+            'partitioning_strategy': partitioning_strategy,
+            'bottleneck': bottleneck,
+            'context': context  # Pass the context
+        }
+
+        presentation = present_transformation(
+            original_code,
+            transformed_code,
+            pattern_info
+        )
+
+        # Display the presentation
+        print(presentation)
 
 
     def process_code(self, code_or_path):

@@ -1,0 +1,8 @@
+import multiprocessing
+
+def map_function({{ loop_var }}):
+    {{ body | indent(4) }}
+
+if __name__ == '__main__':
+    with multiprocessing.Pool() as pool:
+        results = pool.map(map_function, {{ iter_expr }})
