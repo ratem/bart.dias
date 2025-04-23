@@ -1,0 +1,82 @@
+import multiprocessing
+from functools import reduce
+
+def {{ func_name }}_worker({{ ", ".join(func_args) }}):
+    {{ func_body }}
+    {% if is_class_method %}
+    return self.results if hasattr(self, 'results') else None
+    {% else %}
+    return result
+    {% endif %}
+
+def {{ func_name }}_reduce(results):
+    return reduce(lambda x, y: x + y, results)
+
+def {{ func_name }}_parallel({{ ", ".join(func_args) }}):
+    # Determine number of processors
+    num_procs = multiprocessing.cpu_count()
+    
+    {% if is_class_method %}
+    # For class methods, create multiple instances
+    import copy
+    instances = [copy.deepcopy(self) for _ in range(num_procs)]
+    
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Map phase: Process data in parallel
+        mapped_results = pool.map({{ func_name }}_worker, instances)
+        
+        # Reduce phase: Combine results using a tree-based reduction for better performance
+        while len(mapped_results) > 1:
+            # Pair up results and reduce them in parallel
+            pairs = [(mapped_results[i], mapped_results[i+1]) 
+                    for i in range(0, len(mapped_results)-1, 2)]
+            if len(mapped_results) % 2 == 1:
+                pairs.append((mapped_results[-1],))
+            
+            # Reduce pairs in parallel
+            mapped_results = pool.map(lambda p: p[0] if len(p) == 1 else {{ func_name }}_reduce(p), pairs)
+        
+        final_result = mapped_results[0] if mapped_results else None
+    
+    return final_result
+    {% else %}
+    # For regular functions, use the first argument as data
+    data = {{ func_args[0] if func_args else "data" }}
+    
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Map phase: Process data elements in parallel using SIP
+        mapped_results = pool.map({{ func_name }}_worker, data)
+        
+        # Reduce phase: Combine results using a tree-based reduction for better performance
+        while len(mapped_results) > 1:
+            # Pair up results and reduce them in parallel
+            pairs = [(mapped_results[i], mapped_results[i+1]) 
+                    for i in range(0, len(mapped_results)-1, 2)]
+            if len(mapped_results) % 2 == 1:
+                pairs.append((mapped_results[-1],))
+            
+            # Reduce pairs in parallel
+            mapped_results = pool.map(lambda p: p[0] if len(p) == 1 else {{ func_name }}_reduce(p), pairs)
+        
+        final_result = mapped_results[0] if mapped_results else None
+    
+    return final_result
+    {% endif %}
+
+if __name__ == '__main__':
+    # Example usage
+    {% if is_class_method %}
+    # For class methods, create an instance first
+    instance = SomeClass()
+    {% if func_args|length > 1 %}
+    result = instance.{{ func_name }}_parallel({{ func_args[1] }})
+    {% else %}
+    result = instance.{{ func_name }}_parallel()
+    {% endif %}
+    {% else %}
+    # For regular functions
+    result = {{ func_name }}_parallel({{ func_args[0] if func_args else "data" }})
+    {% endif %}
+

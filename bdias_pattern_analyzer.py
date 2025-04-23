@@ -45,17 +45,17 @@ class BDiasPatternAnalyzer:
         # Define the Pattern Characteristic Matrix
         # This maps pattern names to their characteristics
         self.pattern_matrix = {
-            "map": {
-                "structure": ["independent_loop", "list_comprehension"],
-                "data_access": "independent",
-                "communication": "minimal",
-                "synchronization": "start_end",
-                "parallelism": "data_parallel",
-                "suitable_partitioning": ["SDP", "SIP", "horizontal"],
+            "map_reduce": {
+                "structure": ["map_function", "reduce_function", "data_flow"],
+                "data_access": "independent_then_converging",
+                "communication": "tree_based",
+                "synchronization": "barrier_points",
+                "parallelism": "task_parallel",
+                "suitable_partitioning": ["SDP", "SIP"],
                 "performance": {
                     "work": "O(n)",
-                    "span": "O(1)",
-                    "parallelism": "O(n)"
+                    "span": "O(log n)",
+                    "parallelism": "O(n/log n)"
                 }
             },
             "pipeline": {
@@ -95,19 +95,6 @@ class BDiasPatternAnalyzer:
                     "work": "O(n)",
                     "span": "O(n/p + c)",  # c = coordination overhead
                     "parallelism": "O(p)"
-                }
-            },
-            "reduction": {
-                "structure": ["accumulation_loop", "tree_reduction"],
-                "data_access": "converging",
-                "communication": "tree_based",
-                "synchronization": "tree_levels",
-                "parallelism": "logarithmic",
-                "suitable_partitioning": ["SDP", "SIP"],
-                "performance": {
-                    "work": "O(n)",
-                    "span": "O(log n)",
-                    "parallelism": "O(n/log n)"
                 }
             },
             "fork_join": {
@@ -151,19 +138,19 @@ class BDiasPatternAnalyzer:
             }
         }
 
-        # Pattern detection rules - map code structures to pattern indicators
+        # Pattern detection rules - map_reduce code structures to pattern indicators
         self.pattern_detection_rules = self._initialize_detection_rules()
 
     def _initialize_detection_rules(self) -> Dict[str, Dict[str, Any]]:
         """
-        Initialize the pattern detection rules that map code structures
+        Initialize the pattern detection rules that map_reduce code structures
         to pattern indicators.
 
         Returns:
             Dictionary mapping pattern names to detection criteria
         """
         return {
-            "map": {
+            "map_reduce": {
                 "indicators": [
                     {"type": "loop", "has_dependencies": False},
                     {"type": "list_comprehension"}
@@ -258,7 +245,7 @@ class BDiasPatternAnalyzer:
         # Check for Map pattern (independent loops and list comprehensions)
         for loop in structured_code.get("loops", []):
             if self._is_independent_loop(loop):
-                identified_patterns["map"].append({
+                identified_patterns["map_reduce"].append({
                     "type": "loop",
                     "lineno": loop["lineno"],
                     "confidence": 0.9,
@@ -266,12 +253,22 @@ class BDiasPatternAnalyzer:
                 })
 
         for list_comp in structured_code.get("list_comprehensions", []):
-            identified_patterns["map"].append({
+            identified_patterns["map_reduce"].append({
                 "type": "list_comprehension",
                 "lineno": list_comp["lineno"],
                 "confidence": 0.95,
                 "details": list_comp
             })
+
+        # Check for Map-Reduce pattern
+        for function in structured_code.get("functions", []):
+            if self._has_map_reduce_pattern(function):
+                identified_patterns["map_reduce"].append({
+                    "type": "function",
+                    "lineno": function["lineno"],
+                    "confidence": 0.85,
+                    "details": function
+                })
 
         # Check for Pipeline pattern
         for function in structured_code.get("functions", []):
@@ -301,16 +298,6 @@ class BDiasPatternAnalyzer:
                     "lineno": function["lineno"],
                     "confidence": 0.7,
                     "details": function
-                })
-
-        # Check for Reduction pattern
-        for loop in structured_code.get("loops", []):
-            if self._has_accumulation_pattern(loop):
-                identified_patterns["reduction"].append({
-                    "type": "loop",
-                    "lineno": loop["lineno"],
-                    "confidence": 0.85,
-                    "details": loop
                 })
 
         # Check for Fork-Join pattern
@@ -439,7 +426,7 @@ class BDiasPatternAnalyzer:
             # Map pattern
             if is_independent_loop or (node_type == 'for_loop' and not has_nested_loops and not has_reduction_pattern):
                 suggested_patterns.append({
-                    "pattern": "map",
+                    "pattern": "map_reduce",
                     "confidence": 0.9 if is_independent_loop else 0.7,
                     "rationale": "The code block contains independent operations that can be executed in parallel.",
                     "partitioning": ["SDP", "SIP", "horizontal"],
@@ -1204,3 +1191,89 @@ class BDiasPatternAnalyzer:
                         subnode.targets[0].id == subnode.value.left.id:
                     return True  # x = x + ...
         return False
+
+    def _has_map_reduce_pattern(self, node):
+        """
+        Check if a node has a map_reduce-reduce pattern.
+
+        This method identifies patterns where a function is applied to each element
+        of a collection independently (map_reduce phase) and then the results are combined
+        using an associative operation (reduce phase).
+
+        Args:
+            node: The AST node or code block to analyze
+
+        Returns:
+            Boolean indicating if a map_reduce-reduce pattern is present
+        """
+        # If node is a dictionary (from structured_code), extract the source
+        if isinstance(node, dict) and 'source' in node:
+            try:
+                node = ast.parse(node['source'])
+            except (SyntaxError, TypeError):
+                return False
+
+        # Skip processing if node is not an AST node (after potential conversion)
+        if not hasattr(node, '_fields'):
+            return False
+
+        # Look for map_reduce phase (independent operations on elements)
+        has_map_phase = False
+        # Look for reduce phase (combining results)
+        has_reduce_phase = False
+        # Intermediate collection between map_reduce and reduce phases
+        intermediate_var = None
+
+        # First, look for a map_reduce phase (loop or comprehension that processes elements independently)
+        for subnode in ast.walk(node):
+            # Check for list comprehension (common map_reduce pattern)
+            if isinstance(subnode, ast.Assign) and isinstance(subnode.value, ast.ListComp):
+                if len(subnode.targets) > 0 and isinstance(subnode.targets[0], ast.Name):
+                    has_map_phase = True
+                    intermediate_var = subnode.targets[0].id
+                    break
+
+            # Check for loop that processes elements and collects results
+            elif isinstance(subnode, ast.For):
+                # Look for append operations inside the loop
+                for stmt in ast.walk(subnode):
+                    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                        if hasattr(stmt.value.func, 'attr') and stmt.value.func.attr == 'append':
+                            if hasattr(stmt.value.func.value, 'id'):
+                                has_map_phase = True
+                                intermediate_var = stmt.value.func.value.id
+                                break
+                if has_map_phase:
+                    break
+
+        # If we found a map_reduce phase, look for a reduce phase that uses the intermediate results
+        if has_map_phase and intermediate_var:
+            for subnode in ast.walk(node):
+                # Check for common reduction operations
+                if isinstance(subnode, ast.Assign):
+                    # Check for sum, min, max, etc.
+                    if isinstance(subnode.value, ast.Call):
+                        if hasattr(subnode.value.func, 'id') and subnode.value.func.id in ['sum', 'min', 'max',
+                                                                                           'reduce']:
+                            # Check if the argument is our intermediate variable
+                            for arg in subnode.value.args:
+                                if isinstance(arg, ast.Name) and arg.id == intermediate_var:
+                                    has_reduce_phase = True
+                                    break
+
+                # Check for loop that reduces intermediate results
+                elif isinstance(subnode, ast.For):
+                    if hasattr(subnode.iter, 'id') and subnode.iter.id == intermediate_var:
+                        # Look for accumulation operations inside the loop
+                        for stmt in ast.walk(subnode):
+                            if isinstance(stmt, ast.AugAssign):  # +=, *=, etc.
+                                has_reduce_phase = True
+                                break
+
+        # Check for map_reduce-reduce keywords in the code
+        if isinstance(node, dict) and 'source' in node:
+            source = node['source'].lower()
+            if 'map_reduce' in source and 'reduce' in source:
+                return True
+
+        return has_map_phase and has_reduce_phase

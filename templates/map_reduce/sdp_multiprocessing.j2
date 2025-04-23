@@ -1,0 +1,31 @@
+import multiprocessing
+from functools import reduce
+import numpy as np
+
+def map_function({{ loop_var }}):
+    {{ body }}
+    return result
+
+def reduce_function(results):
+    return reduce(lambda x, y: x + y, results)
+
+if __name__ == '__main__':
+    # Determine number of processors
+    num_procs = multiprocessing.cpu_count()
+    
+    # Get data from the iteration expression
+    data = {{ iter_expr }}
+    
+    # Create chunks for spatial domain partitioning
+    chunks = np.array_split(data, num_procs) if hasattr(data, '__len__') else [data]
+    
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Map phase: Process chunks in parallel
+        mapped_chunks = pool.map(map_function, chunks)
+        
+        # Reduce phase: Combine results from all chunks
+        final_result = reduce_function(mapped_chunks)
+    
+    print(f"Final result: {final_result}")
+

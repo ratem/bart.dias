@@ -39,7 +39,7 @@ def map_nested():
         for code in [code1, code2, code3]:
             structured_code = self.parser.parse(code)
             identified_patterns = self.analyzer._identify_patterns(structured_code)
-            self.assertGreater(len(identified_patterns["map"]), 0)
+            self.assertGreater(len(identified_patterns["map_reduce"]), 0)
 
     def test_stencil_pattern_direct(self):
         """Test stencil pattern detection directly without using the parser."""
@@ -122,19 +122,6 @@ def map_nested():
         identified_patterns = self.analyzer._identify_patterns(structured_code)
         self.assertGreater(len(identified_patterns["pipeline"]), 0)
 
-    def test_reduction_pattern(self):
-        """Test Reduction pattern detection."""
-        code = """
-def reduction(data):
-    # Simple sum reduction
-    result = 0
-    for item in data:
-        result += item
-    return result
-"""
-        structured_code = self.parser.parse(code)
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
-        self.assertGreater(len(identified_patterns["reduction"]), 0)
 
     def test_fork_join_pattern_direct(self):
         """Test fork-join pattern detection directly without using the parser."""

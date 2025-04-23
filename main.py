@@ -2,8 +2,7 @@
 Bart.dIAs: Main Entry Point
 
 This module serves as the main entry point for the Bart.dIAs system, a Python
-assistant that analyzes code to identify and suggest parallelization opportunities
-using the multiprocessing module.
+assistant that analyzes code to identify and suggest parallelization opportunities.
 
 Features:
 - Initializes and coordinates the main components of Bart.dIAs

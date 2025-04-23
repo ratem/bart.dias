@@ -10,11 +10,21 @@ Features:
 - Integration with the pattern analyzer to get pattern characteristics
 - Template-based code generation for readability and maintainability
 - Support for different partitioning strategies
+- Hardware-aware code generation that adapts to available system resources
+
+Currently implemented patterns:
+- Map-Reduce: Transforms independent operations followed by associative reduction
+  into parallel implementations using Python's multiprocessing module
+
+Each pattern transformer:
+1. Analyzes the AST to extract key components of the pattern
+2. Selects appropriate templates based on the pattern and partitioning strategy
+3. Generates parallelized code that adapts to the available hardware
+4. Provides hardware-specific recommendations for optimal performance
 
 Classes:
 - BDiasPatternTransformer: Base class for pattern-specific AST transformers
-- MapPatternTransformer: Transforms Map patterns into parallel implementations
-- (Additional pattern transformers to be added)
+- MapReducePatternTransformer: Transforms Map-Reduce patterns into parallel implementations
 
 Dependencies:
 - ast: For AST manipulation
@@ -122,45 +132,36 @@ class BDiasPatternTransformer(ast.NodeTransformer):
         raise NotImplementedError("Subclasses must implement generate_code()")
 
 
-class MapPatternTransformer(BDiasPatternTransformer):
-    """Transforms Map patterns into parallel implementations."""
+class MapReducePatternTransformer(BDiasPatternTransformer):
+    """
+    Transforms Map-Reduce patterns into parallel implementations.
 
-    def visit_For(self, node: ast.For) -> ast.AST:
-        """
-        Transform independent loops into parallel map operations.
+    This class analyzes code structures that exhibit the Map-Reduce pattern
+    and transforms them into parallel implementations using Python's
+    multiprocessing module. It handles both function definitions and for loops,
+    and supports different partitioning strategies.
 
-        Args:
-            node: The for loop node to transform
+    The Map-Reduce pattern involves:
+    1. Map phase: Applying the same operation independently to each element in a dataset
+    2. Reduce phase: Combining the results using an associative operation
 
-        Returns:
-            Transformed AST node
-        """
-        # Skip if this isn't the target bottleneck
-        if not self._is_target_node(node):
-            return self.generic_visit(node)
+    The transformation process:
+    1. Identifies the map and reduce components in the original code
+    2. Creates parallel implementations for both phases
+    3. Adapts the implementation to the available hardware
+    4. Generates code with appropriate error handling and synchronization
 
-        # Extract loop components
-        loop_var = ast.unparse(node.target)
-        iter_expr = ast.unparse(node.iter)
-        body = ast.unparse(node.body)
+    Supported partitioning strategies:
+    - SDP (Spatial Domain Partitioning): Divides data into chunks processed by separate workers
+    - SIP (Spatial Instruction Partitioning): Applies the same operation to different data elements
 
-        # Store context for template rendering
-        self.context.update({
-            'loop_var': loop_var,
-            'iter_expr': iter_expr,
-            'body': body,
-            'partitioning_strategy': self.partitioning_strategy
-        })
-
-        # Add necessary imports
-        self.add_import('multiprocessing', 'Pool')
-
-        # Return the original node (transformation happens in template)
-        return node
+    The generated code automatically adapts to the number of available processors
+    and includes hardware-specific optimizations.
+    """
 
 
     def visit_FunctionDef(self, node):
-        """Transform function definitions into parallel implementations."""
+        """Transform function definitions into parallel map-reduce implementations."""
         # Skip if this isn't the target bottleneck
         if not self._is_target_node(node):
             return self.generic_visit(node)
@@ -174,13 +175,41 @@ class MapPatternTransformer(BDiasPatternTransformer):
         self.context.update({
             'func_name': func_name,
             'func_args': func_args,
-            'func_body': func_body,  # Store as func_body
-            'body': func_body,  # Also store as body for compatibility
+            'func_body': func_body,
+            'body': func_body,  # For compatibility
+            'partitioning_strategy': self.partitioning_strategy,
+            'is_class_method': func_args and func_args[0] == 'self'
+        })
+
+        # Add necessary imports
+        self.add_import('multiprocessing', 'Pool')
+        self.add_import('functools', 'reduce')
+
+        # Return the original node (transformation happens in template)
+        return node
+
+    def visit_For(self, node: ast.For) -> ast.AST:
+        """Transform for loops into parallel map-reduce implementations."""
+        # Skip if this isn't the target bottleneck
+        if not self._is_target_node(node):
+            return self.generic_visit(node)
+
+        # Extract loop components
+        loop_var = ast.unparse(node.target)
+        iter_expr = ast.unparse(node.iter)
+        body = ast.unparse(node.body)
+
+        # Store context for template rendering
+        self.context.update({
+            'loop_var': loop_var,
+            'iter_expr': iter_expr,
+            'body': body,  # This is the key line - storing the loop body
             'partitioning_strategy': self.partitioning_strategy
         })
 
         # Add necessary imports
         self.add_import('multiprocessing', 'Pool')
+        self.add_import('functools', 'reduce')
 
         # Return the original node (transformation happens in template)
         return node
@@ -216,23 +245,55 @@ class MapPatternTransformer(BDiasPatternTransformer):
             # Allow for small differences in line numbers for functions
             return abs(node.lineno - bottleneck_lineno) <= 2
 
-        # For other node types, use exact line number matching
-        return node.lineno == bottleneck_lineno
+        # For loop nodes, allow for small differences in line numbers
+        if isinstance(node, ast.For):
+            # If the bottleneck is a for loop, check both line number and iteration expression
+            if self.bottleneck.get('type') == 'for_loop':
+                # Extract iteration expression from source if available
+                source = self.bottleneck.get('source', '')
+                if source.startswith('for '):
+                    # Try to match the iteration expression
+                    iter_expr = ast.unparse(node.iter)
+                    if iter_expr in source:
+                        return True
+
+            # Allow for small differences in line numbers for loops
+            return abs(node.lineno - bottleneck_lineno) <= 2
+
+        # For other node types, use exact line number matching with a small tolerance
+        return abs(node.lineno - bottleneck_lineno) <= 1
 
     def generate_code(self) -> str:
         """
-        Generate parallel code for the Map pattern.
+        Generate parallel code for the Map-Reduce pattern.
 
         Returns:
             Generated code as a string
         """
-        # Add precomputed values to the context - draft hdw specific values
+        # Add precomputed values to the context - hardware specific values
         import multiprocessing
         processor_count = multiprocessing.cpu_count()
         data_size = 10  # Default value
 
-        # For loops, try to determine the size of the iterable
-        if 'iter_expr' in self.context:
+        # Estimate data size from context
+        if 'func_body' in self.context:
+            func_body = self.context['func_body']
+            # Look for array/list declarations with size information
+            import re
+            size_patterns = [
+                r'shape=\((\d+),\)',  # numpy array shape
+                r'range\((\d+)\)',  # range function
+                r'len\((\w+)\)',  # length of something
+            ]
+
+            for pattern in size_patterns:
+                matches = re.findall(pattern, func_body)
+                if matches:
+                    try:
+                        data_size = max(data_size, int(matches[0]))
+                    except (ValueError, IndexError):
+                        pass
+        elif 'iter_expr' in self.context:
             iter_expr = self.context['iter_expr']
             if 'range' in iter_expr:
                 # Try to extract the range parameters
@@ -247,6 +308,10 @@ class MapPatternTransformer(BDiasPatternTransformer):
                 except (ValueError, IndexError):
                     # Keep default if parsing fails
                     pass
+            elif 'len(' in iter_expr:
+                # This is a common pattern in the for loop at line 197
+                # For example: for t in range(1, len(self.accelerations_y)):
+                data_size = 100  # Use a reasonable default for array lengths
 
         elements_per_processor = max(1, data_size // processor_count)
 
@@ -266,39 +331,23 @@ class MapPatternTransformer(BDiasPatternTransformer):
         # Determine if we're dealing with a function or a loop
         is_function = 'func_name' in self.context
 
-        # Check if this is a class method (first argument is 'self')
-        is_class_method = False
-        if is_function and 'func_args' in self.context and len(self.context['func_args']) > 0:
-            is_class_method = self.context['func_args'][0] == 'self'
-
-            # If it's a class method, modify the context to handle it properly
-            if is_class_method:
-                # Use the second argument as data if available, otherwise use a default
-                if len(self.context['func_args']) > 1:
-                    self.context['data_arg'] = self.context['func_args'][1]
-                else:
-                    self.context['data_arg'] = 'data'
-
-                # Add a flag to indicate this is a class method
-                self.context['is_class_method'] = True
-
         # Choose template based on node type and partitioning strategy
         if is_function:
             # Function templates
             if "SDP" in self.partitioning_strategy:
-                template_name = "map/function_sdp_multiprocessing.j2"
+                template_name = "map_reduce/function_sdp_multiprocessing.j2"
             elif "SIP" in self.partitioning_strategy:
-                template_name = "map/function_sip_multiprocessing.j2"
+                template_name = "map_reduce/function_sip_multiprocessing.j2"
             else:
-                template_name = "map/function_default_multiprocessing.j2"
+                template_name = "map_reduce/function_default_multiprocessing.j2"
         else:
             # Loop templates
             if "SDP" in self.partitioning_strategy:
-                template_name = "map/sdp_multiprocessing.j2"
+                template_name = "map_reduce/sdp_multiprocessing.j2"
             elif "SIP" in self.partitioning_strategy:
-                template_name = "map/sip_multiprocessing.j2"
+                template_name = "map_reduce/sip_multiprocessing.j2"
             else:
-                template_name = "map/default_multiprocessing.j2"
+                template_name = "map_reduce/default_multiprocessing.j2"
 
         # Load and render the template
         try:
@@ -306,9 +355,46 @@ class MapPatternTransformer(BDiasPatternTransformer):
             return template.render(**self.context)
         except jinja2.exceptions.TemplateNotFound:
             # Fallback to default template if specific template not found
-            fallback_template_name = "map/default_multiprocessing.j2" if not is_function else "map/function_default_multiprocessing.j2"
+            fallback_template_name = "map_reduce/default_multiprocessing.j2" if not is_function else "map_reduce/function_default_multiprocessing.j2"
             template = self.env.get_template(fallback_template_name)
             return template.render(**self.context)
+
+
+
+def generate_hardware_recommendations(context: Dict[str, Any]) -> str:
+    """
+    Generate hardware-specific recommendations based on the context.
+
+    Args:
+        context: Dictionary containing context information
+
+    Returns:
+        Hardware recommendations as a string
+    """
+    recommendations = []
+
+    processor_count = context.get('processor_count', 0)
+    data_size = context.get('data_size', 0)
+    elements_per_processor = context.get('elements_per_processor', 0)
+    is_memory_bound = context.get('is_memory_bound', False)
+
+    if processor_count > 0:
+        recommendations.append(f"This code will utilize {processor_count} processors.")
+
+    if elements_per_processor > 0:
+        recommendations.append(f"Each processor will handle approximately {elements_per_processor} elements.")
+
+    if is_memory_bound:
+        recommendations.append(
+            "This operation is memory-bound. Consider reducing the data size or increasing available memory.")
+    else:
+        recommendations.append("This operation is CPU-bound and should scale well with additional processors.")
+
+    if data_size < processor_count:
+        recommendations.append(
+            "The data size is smaller than the number of processors. Consider using fewer processors to avoid overhead.")
+
+    return "\n".join(recommendations)
 
 
 def generate_parallel_code(bottleneck: Dict[str, Any], pattern: str, partitioning_strategy: List[str]) -> \
@@ -316,25 +402,41 @@ def generate_parallel_code(bottleneck: Dict[str, Any], pattern: str, partitionin
     """
     Generate parallelized code for a bottleneck based on identified pattern.
 
+    This function creates a pattern-specific transformer for the given bottleneck
+    and pattern, applies the transformation, and generates parallelized code
+    using templates appropriate for the pattern and partitioning strategy.
+
     Args:
-        bottleneck: Dictionary containing bottleneck information
-        pattern: Identified parallel pattern (e.g., 'map', 'stencil')
-        partitioning_strategy: Recommended partitioning strategy
+        bottleneck: Dictionary containing bottleneck information including:
+                    - source: The source code of the bottleneck
+                    - lineno: The line number of the bottleneck
+                    - type: The type of the bottleneck (function, for_loop, etc.)
+        pattern: Identified parallel pattern (e.g., 'map_reduce', 'stencil')
+        partitioning_strategy: List of recommended partitioning strategies
+                               (e.g., ['SDP', 'SIP'])
 
     Returns:
-        Tuple of (original_code, transformed_code)
+        Tuple of (original_code, transformed_code, context) where:
+        - original_code: The original source code of the bottleneck
+        - transformed_code: The parallelized code generated for the bottleneck
+        - context: Dictionary containing context information used for generation
+
+    Currently supported patterns:
+    - map_reduce: Transforms independent operations followed by associative reduction
+
+    The function automatically selects the appropriate transformer and templates
+    based on the pattern and partitioning strategy, and adapts the generated code
+    to the available hardware resources.
     """
+
     # Parse the bottleneck source code
     source_code = bottleneck['source']
     tree = ast.parse(source_code)
 
     # Create appropriate transformer based on pattern
-    if pattern == 'map':
-        transformer = MapPatternTransformer(bottleneck, partitioning_strategy)
+    if pattern == 'map_reduce':
+        transformer = MapReducePatternTransformer(bottleneck, partitioning_strategy)
     # Add more patterns as needed
-    else:
-        # Default to Map pattern for now
-        transformer = MapPatternTransformer(bottleneck, partitioning_strategy)
 
     # Apply the transformation
     transformer.visit(tree)

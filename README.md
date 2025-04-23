@@ -1,15 +1,17 @@
-# Bart.dIAs - Parallel Programming Assistant
+**Version 0.9.1a**
 
-Bart.dIAs is a Python assistant designed to analyze code and identify opportunities for parallelization. It performs static analysis to detect parallelizable patterns and provides concrete suggestions for implementing parallel solutions using Python's multiprocessing module.
+Bart.dIAs is an assistant for the WebGRIPP environment. Currently, it is solely an assistante for parallel programming that analyzes sequential code to identify bottlenecks and suggest parallelization strategies. 
+It combines critical path analysis with pattern recognition to provide targeted recommendations for improving application performance.
+
 
 ## Features
 
-### Block-Based Analysis
-
-- **Pattern Detection**: Identifies parallelizable patterns in Python code including loops, functions, nested structures, and list comprehensions
-- **Dependency Analysis**: Performs sophisticated data flow analysis to determine which code blocks can be safely parallelized
-- **Side-by-Side Comparison**: Shows original code alongside parallelized versions for easy implementation
-- **Code Generation**: Creates properly indented, template-based code suggestions using Jinja2
+- **Critical Path Analysis**: Identifies performance bottlenecks in sequential code using directed acyclic graph (DAG) representation
+- **Parallel Pattern Recognition**: Detects common parallel programming patterns in code
+- **Pattern-Based Code Generation**: Automatically generates parallelized code for identified patterns (currently supporting Map-Reduce pattern)
+- **Hardware-Aware Recommendations**: Provides optimization suggestions based on available system resources
+- **Theoretical Performance Metrics**: Calculates work, span, and parallelism metrics based on Träff's "Lectures on Parallel Computing"
+- **Partitioning Strategy Recommendations**: Suggests appropriate data and task partitioning strategies for different patterns
 
 
 ### Critical Path Analysis
@@ -31,6 +33,14 @@ Bart.dIAs is a Python assistant designed to analyze code and identify opportunit
     - Nested loops with varying depths
     - Loops containing function calls that themselves contain loops
     - For loops inside while loops
+
+## New in Version 0.9.1a
+
+- **Map-Reduce Pattern Implementation**: Added complete support for detecting and generating parallelized code for the Map-Reduce pattern
+- **Hardware-Aware Code Generation**: Generated code now adapts to the actual number of processors available on the system
+- **AST-Based Transformation**: Using Python's ast module for robust code analysis and transformation
+- **Template-Based Code Generation**: Utilizing Jinja2 templates for readable, maintainable generated code
+- **Support for Different Partitioning Strategies**: Implemented SDP (Spatial Domain Partitioning) and SIP (Spatial Instruction Partitioning) templates
 
 
 ## Installation
@@ -128,10 +138,12 @@ Recommendations:
 
 Bart.dIAs consists of several key components:
 
-1. **BDiasParser**: Parses Python code using AST analysis to identify parallelizable patterns and analyze dependencies
-2. **BDiasCodeGen**: Generates parallelization suggestions using Jinja2 templates
+1. **BDiasParser**: Parses Python code using AST analysis to identify parallelizable blocks and analyze dependencies
+2. **BDiasCodeGen**: Generates parallelization suggestions using Jinja2 templates for blocks
 3. **BDiasCriticalPathAnalyzer**: Performs theoretical analysis of code's inherent parallelism
-4. **BDiasAssist**: Provides the user interface and coordinates the analysis process
+4. **BDiasPatternAnalyzer**: Parses Python code using AST analysis to identify parallelizable patterns and analyze dependencies
+5. **BDiasPatternCodeGen**: Generates parallelization suggestions using Jinja2 templates for patterns
+6. **BDiasAssist**: Provides the user interface and coordinates the analysis process
 
 ## Theoretical Foundation
 
@@ -151,17 +163,17 @@ The critical path analysis is based on established parallel computing theory fro
 - **Theoretical Bounds**: Critical path analysis provides theoretical upper bounds that may not be achievable in practice
 
 
-## Roadmap
+## Documentation
 
-See the [Roadmap](Roadmap.md) file for planned features and improvements.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+For detailed documentation, see [The Docs](https://github.com/ratem/bart.dias/docs).
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## AI Use
+
+This project uses AI for writing tests, docstrings, documentation, code templates, and input/output code.
 
 ## Acknowledgments
 

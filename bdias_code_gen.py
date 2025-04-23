@@ -1,7 +1,7 @@
 """
 BDiasCodeGen: Code Generation Module for Bart.dIAs
 
-This module is responsible for generating parallelization suggestions for Python code.
+This module is responsible for generating block-based parallelization suggestions for Python code.
 It uses Jinja2 templates to create properly indented and structured code suggestions
 for various parallelization opportunities.
 

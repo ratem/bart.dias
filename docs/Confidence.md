@@ -23,7 +23,7 @@ The confidence value comes from the pattern detection process itself. When analy
 
 ```python
 if self._is_independent_loop(loop):
-    identified_patterns["map"].append({
+    identified_patterns["map_reduce"].append({
         "type": "loop",
         "lineno": loop["lineno"],
         "confidence": 0.9,  # 90% confidence
@@ -58,7 +58,7 @@ The confidence values I suggested in the BDiasPatternAnalyzer implementation wer
 
 ```python
 if self._is_independent_loop(loop):
-    identified_patterns["map"].append({
+    identified_patterns["map_reduce"].append({
         "type": "loop",
         "lineno": loop["lineno"],
         "confidence": 0.9,  # High confidence value
@@ -76,7 +76,7 @@ Similarly, for list comprehensions as Map patterns:
 
 ```python
 for list_comp in structured_code.get("list_comprehensions", []):
-    identified_patterns["map"].append({
+    identified_patterns["map_reduce"].append({
         "type": "list_comprehension",
         "lineno": list_comp["lineno"],
         "confidence": 0.95,  # Even higher confidence
@@ -127,7 +127,7 @@ The confidence thresholds in the pattern detection rules were similarly calibrat
 
 ```python
 self.pattern_detection_rules = {
-    "map": {
+    "map_reduce": {
         "indicators": [...],
         "confidence_threshold": 0.8
     },

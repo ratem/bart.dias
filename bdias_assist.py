@@ -219,6 +219,14 @@ class BDiasAssist:
             critical_path_analyzer.visualize_dag()
 
     def _handle_pattern_based_code_generation(self, bottleneck, pattern, partitioning_strategy):
+        """
+        Generate parallelized code for a bottleneck based on identified pattern.
+
+        Args:
+            bottleneck: Dictionary containing bottleneck information
+            pattern: Identified parallel pattern (e.g., 'map_reduce', 'stencil')
+            partitioning_strategy: Recommended partitioning strategy
+        """
         from bdias_pattern_codegen import generate_parallel_code
         from bdias_pattern_presenter import present_transformation
 
@@ -234,7 +242,7 @@ class BDiasAssist:
             'pattern': pattern,
             'partitioning_strategy': partitioning_strategy,
             'bottleneck': bottleneck,
-            'context': context  # Pass the context
+            'context': context
         }
 
         presentation = present_transformation(
@@ -246,6 +254,10 @@ class BDiasAssist:
         # Display the presentation
         print(presentation)
 
+        # Add hardware-specific recommendations
+        if 'hardware_recommendations' in context:
+            print("\n=== Hardware Recommendations ===")
+            print(context['hardware_recommendations'])
 
     def process_code(self, code_or_path):
         """Parses code or a file content and presents results."""

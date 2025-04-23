@@ -22,47 +22,36 @@ from typing import Dict, Any
 
 
 def present_transformation(original_code: str, transformed_code: str, pattern_info: Dict[str, Any]) -> str:
-    # Initialize Jinja2 environment
-    env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader('templates'),
-        trim_blocks=True,
-        lstrip_blocks=True
-    )
+    """
+    Present the transformation from sequential to parallel code in plain text format.
 
-    # Load the appropriate template
-    pattern = pattern_info['pattern']
-    template_name = f"{pattern}/visualization.html"
+    Args:
+        original_code: The original sequential code
+        transformed_code: The parallelized code
+        pattern_info: Dictionary containing pattern information
 
-    try:
-        template = env.get_template(template_name)
-    except jinja2.exceptions.TemplateNotFound:
-        # Fall back to default template
-        template = env.get_template("base/code_transformation.html")
-
+    Returns:
+        Formatted presentation as a string
+    """
     # Generate explanation
     explanation = generate_explanation(pattern_info)
+    pattern = pattern_info['pattern']
 
-    # Combine context from pattern_info with additional visualization context
-    context = {
-        'original_code': original_code,
-        'transformed_code': transformed_code,
-        'pattern_name': pattern.upper(),
-        'pattern_description': get_pattern_description(pattern),
-        'partitioning_strategy': ', '.join(pattern_info['partitioning_strategy']),
-        'explanation': explanation,
-        # Add defaults for visualization variables
-        'data_size': 10,
-        'processor_count': 4,
-        'processor_ranges': [(p, p * 3, min((p + 1) * 3, 10)) for p in range(4)],
-        'elements_per_processor': 3
-    }
+    # Format the output as plain text
+    output = [
+        f"=== {pattern.upper()} Pattern Transformation ===\n",
+        f"Pattern: {pattern.upper()}",
+        f"Description: {get_pattern_description(pattern)}",
+        f"Partitioning Strategy: {', '.join(pattern_info['partitioning_strategy'])}",
+        "\n=== Original Code ===\n",
+        original_code,
+        "\n=== Parallelized Code ===\n",
+        transformed_code,
+        "\n=== Transformation Explanation ===\n",
+        explanation
+    ]
 
-    # Add the transformer context if available
-    if 'context' in pattern_info:
-        context.update(pattern_info['context'])
-
-    # Render the template
-    return template.render(**context)
+    return "\n".join(output)
 
 
 def generate_explanation(pattern_info: Dict[str, Any]) -> str:
@@ -79,16 +68,19 @@ def generate_explanation(pattern_info: Dict[str, Any]) -> str:
     partitioning_strategy = pattern_info['partitioning_strategy']
 
     explanations = {
-        'map': {
-            'SDP': "This transformation applies Spatial Domain Partitioning to the Map pattern. "
-                   "The data is divided into chunks, each processed by a separate worker. "
-                   "This approach is efficient for large datasets that can be easily divided.",
-            'SIP': "This transformation applies Spatial Instruction Partitioning to the Map pattern. "
-                   "The same operation is applied to different data elements in parallel. "
-                   "This approach is efficient for independent operations on data elements.",
-            'default': "This transformation parallelizes the Map pattern using Python's multiprocessing module. "
-                       "The same operation is applied to different data elements in parallel."
+        'map_reduce': {
+            'SDP': "This transformation applies Spatial Domain Partitioning to the Map-Reduce pattern. "
+                   "The data is divided into chunks, each processed by a separate worker in the map phase. "
+                   "The results are then combined in the reduce phase. This approach is efficient for large datasets.",
+            'SIP': "This transformation applies Spatial Instruction Partitioning to the Map-Reduce pattern. "
+                   "The same map operation is applied to different data elements in parallel, followed by a "
+                   "tree-based reduction phase. This approach is efficient for computations with independent map "
+                   "operations followed by associative reductions.",
+            'default': "This transformation parallelizes the Map-Reduce pattern using Python's multiprocessing module. "
+                       "Data elements are processed independently in the map phase, and the results are combined "
+                       "in the reduce phase."
         }
+        # ... other patterns ...
     }
 
     # Get explanation based on pattern and partitioning strategy
@@ -112,8 +104,9 @@ def get_pattern_description(pattern: str) -> str:
         Pattern description as a string
     """
     descriptions = {
-        'map': "The Map pattern involves applying the same operation independently to each element in a dataset. "
-               "It is highly parallelizable because each operation is independent of the others.",
+        'map_reduce': "The Map-Reduce pattern involves applying the same operation independently to each element "
+                     "in a dataset (map phase) and then combining the results using an associative operation "
+                     "(reduce phase). It is highly scalable and widely used for processing large datasets.",
         'stencil': "The Stencil pattern involves updating array elements based on neighboring elements. "
                    "It is common in scientific computing and image processing.",
         'pipeline': "The Pipeline pattern involves dividing a task into a series of stages, "

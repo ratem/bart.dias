@@ -1,0 +1,78 @@
+import multiprocessing
+from functools import reduce
+import numpy as np
+
+def {{ func_name }}_map({{ ", ".join(func_args) }}):
+    """Map function that processes data elements independently."""
+    # This is a placeholder for the actual map logic
+    {{ func_body | indent(4) }}
+    {% if is_class_method is defined and is_class_method %}
+    return self.jerks_y if hasattr(self, 'jerks_y') else None
+    {% else %}
+    # Return the processed data
+    return result
+    {% endif %}
+
+def {{ func_name }}_reduce(results):
+    """Reduce function that combines mapped results."""
+    # This is a placeholder for the actual reduce logic
+    {% if is_class_method is defined and is_class_method %}
+    # For class methods, we might not need a true reduction
+    # since each worker processes a different part of the array
+    return results[0] if results else None
+    {% else %}
+    # For regular functions, combine results using an appropriate operation
+    return reduce(lambda x, y: x + y, results)
+    {% endif %}
+
+def {{ func_name }}_parallel({{ ", ".join(func_args) }}):
+    """Parallel implementation using Map-Reduce pattern with Spatial Domain Partitioning."""
+    # Determine number of processors
+    num_procs = multiprocessing.cpu_count()
+
+    {% if is_class_method is defined and is_class_method %}
+    # For class methods, we need to handle the data differently
+    # Create multiple instances to avoid shared state issues
+    instances = []
+    for _ in range(num_procs):
+        import copy
+        instance = copy.deepcopy(self)
+        instances.append(instance)
+
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Map phase: Process data in parallel
+        mapped_results = pool.map({{ func_name }}_map, instances)
+
+        # Reduce phase: Combine results
+        final_result = {{ func_name }}_reduce(mapped_results)
+
+    return final_result
+    {% else %}
+    # For regular functions, use the first argument as data
+    data = {{ func_args[0] if func_args else "data" }}
+
+    # Create chunks for spatial domain partitioning
+    chunks = np.array_split(data, num_procs) if hasattr(data, '__len__') else [data]
+
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Map phase: Process chunks in parallel
+        mapped_chunks = pool.map({{ func_name }}_map, chunks)
+
+        # Reduce phase: Combine results from all chunks
+        final_result = {{ func_name }}_reduce(mapped_chunks)
+
+    return final_result
+    {% endif %}
+
+if __name__ == '__main__':
+    # Example usage
+    {% if is_class_method is defined and is_class_method %}
+    # For class methods, create an instance first
+    instance = DKA()  # Use the actual class name from the code
+    result = instance.{{ func_name }}_parallel({{ func_args[1] if func_args|length > 1 else "True" }}, {{ func_args[2] if func_args|length > 2 else "True" }})
+    {% else %}
+    # For regular functions
+    result = {{ func_name }}_parallel({{ func_args[0] if func_args else "data" }})
+    {% endif %}

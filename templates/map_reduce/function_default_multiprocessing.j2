@@ -1,0 +1,48 @@
+import multiprocessing
+from functools import reduce
+
+def {{ func_name }}_worker({{ ", ".join(func_args) }}):
+    {{ func_body }}
+    {% if is_class_method %}
+    return self.results if hasattr(self, 'results') else None
+    {% else %}
+    return result
+    {% endif %}
+
+def {{ func_name }}_reduce(results):
+    return reduce(lambda x, y: x + y, results)
+
+def {{ func_name }}_parallel({{ ", ".join(func_args) }}):
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Process data in parallel
+        {% if is_class_method %}
+        # For class methods, create multiple instances
+        import copy
+        instances = [copy.deepcopy(self) for _ in range({{ processor_count }})]
+        mapped_results = pool.map({{ func_name }}_worker, instances)
+        {% else %}
+        # For regular functions, use the first argument
+        mapped_results = pool.map({{ func_name }}_worker, {{ func_args[0] if func_args else "data" }})
+        {% endif %}
+        
+        # Reduce phase
+        final_result = {{ func_name }}_reduce(mapped_results)
+    
+    return final_result
+
+if __name__ == '__main__':
+    # Example usage
+    {% if is_class_method %}
+    # For class methods, create an instance first
+    instance = SomeClass()
+    {% if func_args|length > 1 %}
+    result = instance.{{ func_name }}_parallel({{ func_args[1] }})
+    {% else %}
+    result = instance.{{ func_name }}_parallel()
+    {% endif %}
+    {% else %}
+    # For regular functions
+    result = {{ func_name }}_parallel({{ func_args[0] if func_args else "data" }})
+    {% endif %}
+

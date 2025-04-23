@@ -1,0 +1,27 @@
+import multiprocessing
+from functools import reduce
+
+def map_function({{ loop_var }}):
+    {{ body }}
+    return result
+
+def reduce_function(results):
+    return reduce(lambda x, y: x + y, results)
+
+if __name__ == '__main__':
+    # Determine number of processors
+    num_procs = multiprocessing.cpu_count()
+    
+    # Get data from the iteration expression
+    data = {{ iter_expr }}
+    
+    # Create process pool
+    with multiprocessing.Pool() as pool:
+        # Map phase: Process data elements in parallel
+        mapped_results = pool.map(map_function, data)
+        
+        # Reduce phase: Combine results
+        final_result = reduce_function(mapped_results)
+    
+    print(f"Final result: {final_result}")
+
