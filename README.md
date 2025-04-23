@@ -64,6 +64,8 @@ pip install -r requirements.txt
 - Python 3.6+
 - Jinja2
 - NetworkX (for DAG visualization)
+- Numpy
+- Psutil
 - Matplotlib (optional, for visualization)
 
 
@@ -165,7 +167,7 @@ The critical path analysis is based on established parallel computing theory fro
 
 ## Documentation
 
-For detailed documentation, see [The Docs](https://github.com/ratem/bart.dias/docs).
+For detailed documentation, see [The Docs](https://github.com/ratem/bart.dias/tree/main/docs).
 
 ## License
 
