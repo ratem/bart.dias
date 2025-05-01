@@ -492,51 +492,305 @@ class BDiasCriticalPathAnalyzer:
 
         return bottlenecks[:3]  # Return top 3 bottlenecks
 
-    def visualize_dag(self, output_file: str = None) -> None:
+    '''
+    def visualize_dag(self, output_file: str = None, mode: str = "2d",
+                      critical_path_nodes: Optional[set] = None,
+                      critical_path_edges: Optional[set] = None) -> None:
         """
-        Visualize the DAG using matplotlib and networkx.
-
-        Args:
-            output_file: Optional file path to save the visualization
+        Visualize the DAG, coloring critical path nodes and edges in red, others in blue/gray.
+        Node labels are only the line numbers (or range) of the code block.
+        Parameters:
+            output_file (str, optional): Path to save the 2D plot (if mode="2d").
+            mode (str): "2d" (default, static plot) or "3d" (interactive, requires matplotlib 3D).
+            critical_path_nodes (set, optional): Set of node IDs to highlight as critical path.
+            critical_path_edges (set, optional): Set of edge tuples (u, v) on the critical path.
         """
-        try:
-            import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt
+        import networkx as nx
 
-            plt.figure(figsize=(12, 8))
+        G = self.dag
 
-            # Create position layout
-            pos = nx.spring_layout(self.dag)
+        # Compute critical path nodes and edges if not provided
+        if critical_path_nodes is None or critical_path_edges is None:
+            try:
+                critical_path, _ = self._find_critical_path()
+                critical_path_nodes = set(critical_path)
+                critical_path_edges = set(zip(critical_path, critical_path[1:]))
+            except Exception:
+                critical_path_nodes = set()
+                critical_path_edges = set()
 
-            # Draw nodes with different colors based on type
-            node_colors = []
-            for node in self.dag.nodes():
-                if node == self.entry_node or node == self.exit_node:
-                    node_colors.append('lightgray')
-                elif self.dag.nodes[node].get('type') == 'function':
-                    node_colors.append('lightblue')
-                elif 'loop' in self.dag.nodes[node].get('type', ''):
-                    node_colors.append('lightgreen')
+        # Prepare node colors and labels
+        node_colors = []
+        node_labels = {}
+        for n, data in G.nodes(data=True):
+            # Label is the line number(s)
+            if "lineno" in data and "end_lineno" in data:
+                if data["lineno"] == data["end_lineno"]:
+                    label = f"{data['lineno']}"
                 else:
-                    node_colors.append('lightsalmon')
-
-            # Draw the graph
-            nx.draw(self.dag, pos, with_labels=True, node_color=node_colors,
-                    node_size=500, font_size=8, arrows=True)
-
-            # Add node labels with work/span values
-            node_labels = {node: f"{node}\nW:{data.get('work', 0):.1f} S:{data.get('span', 0):.1f}"
-                           for node, data in self.dag.nodes(data=True)}
-            nx.draw_networkx_labels(self.dag, pos, labels=node_labels, font_size=6)
-
-            plt.title("Code Dependency Graph with Work/Span Analysis")
-
-            if output_file:
-                plt.savefig(output_file)
+                    label = f"{data['lineno']}-{data['end_lineno']}"
+            elif "lineno" in data:
+                label = f"{data['lineno']}"
             else:
-                plt.show()
+                label = str(n)
+            node_labels[n] = label
+            # Color: red for critical path, blue otherwise
+            node_colors.append("red" if n in critical_path_nodes else "blue")
 
-        except ImportError:
-            print("Matplotlib or networkx not available for visualization.")
+        # Prepare edge colors
+        edge_colors = []
+        for u, v in G.edges():
+            if (u, v) in critical_path_edges:
+                edge_colors.append("red")
+            else:
+                edge_colors.append("gray")
+
+        if mode == "3d":
+            try:
+                from mpl_toolkits.mplot3d import Axes3D
+                import numpy as np
+                pos_2d = nx.spring_layout(G, seed=42, dim=2)
+                # Assign a z coordinate based on topological order
+                topo_order = list(nx.topological_sort(G))
+                z_coords = {n: i for i, n in enumerate(topo_order)}
+                pos_3d = {n: (x, y, z_coords[n]) for n, (x, y) in pos_2d.items()}
+
+                fig = plt.figure(figsize=(10, 8))
+                ax = fig.add_subplot(111, projection='3d')
+
+                # Draw edges
+                for (u, v), color in zip(G.edges(), edge_colors):
+                    x = [pos_3d[u][0], pos_3d[v][0]]
+                    y = [pos_3d[u][1], pos_3d[v][1]]
+                    z = [pos_3d[u][2], pos_3d[v][2]]
+                    ax.plot(x, y, z, color=color, alpha=0.7, linewidth=2 if color == "red" else 1)
+
+                # Draw nodes
+                xs = [pos_3d[n][0] for n in G.nodes()]
+                ys = [pos_3d[n][1] for n in G.nodes()]
+                zs = [pos_3d[n][2] for n in G.nodes()]
+                ax.scatter(xs, ys, zs, c=node_colors, s=200, depthshade=True)
+
+                # Add labels
+                for n in G.nodes():
+                    x, y, z = pos_3d[n]
+                    ax.text(x, y, z, node_labels[n], fontsize=10, ha='center', va='center')
+
+                ax.set_title("DAG with Critical Path (3D)")
+                plt.show()
+            except ImportError:
+                print("mpl_toolkits.mplot3d is required for 3D visualization.")
+        else:
+            # 2D plot
+            pos = nx.spring_layout(G, seed=42)
+            plt.figure(figsize=(12, 8))
+            nx.draw_networkx_edges(G, pos, edge_color=edge_colors, width=[2 if c == "red" else 1 for c in edge_colors],
+                                   alpha=0.7)
+            nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=700)
+            nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=10, font_color='white')
+            plt.title("DAG with Critical Path (2D)")
+            plt.axis('off')
+            if output_file:
+                plt.savefig(output_file, bbox_inches='tight')
+            plt.show()
+
+    '''
+
+    def visualize_dag(
+            self,
+            output_file: Optional[str] = None,
+            mode: str = "2d",
+            critical_path_nodes: Optional[set] = None,
+            critical_path_edges: Optional[set] = None,
+    ) -> None:
+        """
+        Visualize the DAG, coloring critical path nodes and edges in red, others in blue/gray.
+        START/END nodes are always shown and not faded. Node labels are only the line numbers (or range).
+        Non-critical-path, non-START/END nodes are faded.
+        In 3D, nodes in the same group are spaced out.
+        Parameters:
+            output_file (str, optional): Path to save the 2D plot (if mode="2d").
+            mode (str): "2d" (default, static plot) or "3d" (interactive, requires matplotlib 3D).
+            critical_path_nodes (set, optional): Set of node IDs to highlight as critical path.
+            critical_path_edges (set, optional): Set of edge tuples (u, v) on the critical path.
+        """
+        import matplotlib.pyplot as plt
+        import networkx as nx
+
+        G = self.dag
+
+        # Compute critical path nodes and edges if not provided
+        if critical_path_nodes is None or critical_path_edges is None:
+            try:
+                critical_path, _ = self._find_critical_path()
+                critical_path_nodes = set(critical_path)
+                critical_path_edges = set(zip(critical_path, critical_path[1:]))
+            except Exception:
+                critical_path_nodes = set()
+                critical_path_edges = set()
+
+        # Prepare node colors, alphas, and labels
+        node_colors = []
+        node_alphas = []
+        node_labels = {}
+        node_groups = {}
+        group_counter = 0
+        group_map = {}
+
+        for n, data in G.nodes(data=True):
+            # Label is the line number(s)
+            if n == self.entry_node:
+                label = "START"
+            elif n == self.exit_node:
+                label = "END"
+            elif "lineno" in data and "end_lineno" in data:
+                if data["lineno"] == data["end_lineno"]:
+                    label = f"{data['lineno']}"
+                else:
+                    label = f"{data['lineno']}-{data['end_lineno']}"
+            elif "lineno" in data:
+                label = f"{data['lineno']}"
+            else:
+                label = str(n)
+            node_labels[n] = label
+
+            # Grouping for 3D: group by function name if present, else by type
+            group_key = data.get("name") or data.get("type") or "other"
+            if group_key not in group_map:
+                group_map[group_key] = group_counter
+                group_counter += 1
+            node_groups[n] = group_map[group_key]
+
+            # Color and alpha: critical path = red/1.0, START/END = black/1.0, others blue/0.2
+            if n == self.entry_node or n == self.exit_node:
+                node_colors.append("black")
+                node_alphas.append(1.0)
+            elif n in critical_path_nodes:
+                node_colors.append("red")
+                node_alphas.append(1.0)
+            else:
+                node_colors.append("blue")
+                node_alphas.append(0.2)
+
+        # Prepare edge colors
+        edge_colors = []
+        for u, v in G.edges():
+            if (u, v) in critical_path_edges:
+                edge_colors.append("red")
+            else:
+                edge_colors.append("gray")
+
+        if mode == "3d":
+            try:
+                from mpl_toolkits.mplot3d import Axes3D
+
+                # Axes: X=node size, Y=start line, Z=group (with jitter for spacing)
+                x_vals, y_vals, z_vals = {}, {}, {}
+                group_jitter = {}
+
+                for n, data in G.nodes(data=True):
+                    # X: node size (lines spanned)
+                    lines = (data.get("lineno", 0), data.get("end_lineno", data.get("lineno", 0)))
+                    x = max(1, lines[1] - lines[0] + 1)
+                    x_vals[n] = x
+
+                    # Y: starting line number
+                    y = data.get("lineno", 0)
+                    y_vals[n] = y
+
+                    # Z: group with jitter for spacing
+                    group = node_groups[n]
+                    if group not in group_jitter:
+                        group_jitter[group] = 0
+                    z = group + 0.2 * group_jitter[group]
+                    group_jitter[group] += 1
+                    z_vals[n] = z
+
+                fig = plt.figure(figsize=(12, 9))
+                ax = fig.add_subplot(111, projection="3d")
+
+                # Draw edges
+                for (u, v), color in zip(G.edges(), edge_colors):
+                    ax.plot(
+                        [x_vals[u], x_vals[v]],
+                        [y_vals[u], y_vals[v]],
+                        [z_vals[u], z_vals[v]],
+                        color=color,
+                        alpha=0.8,
+                        linewidth=2 if color == "red" else 1,
+                    )
+
+                # Draw nodes with alpha
+                xs = [x_vals[n] for n in G.nodes()]
+                ys = [y_vals[n] for n in G.nodes()]
+                zs = [z_vals[n] for n in G.nodes()]
+                for i, n in enumerate(G.nodes()):
+                    ax.scatter(
+                        xs[i], ys[i], zs[i],
+                        c=node_colors[i],
+                        s=250,
+                        alpha=node_alphas[i],
+                        depthshade=True
+                    )
+
+                # Add labels
+                for n in G.nodes():
+                    ax.text(
+                        x_vals[n], y_vals[n], z_vals[n], node_labels[n],
+                        fontsize=10, ha="center", va="center"
+                    )
+
+                ax.set_xlabel("Node Size (lines)")
+                ax.set_ylabel("Start Line")
+                ax.set_zlabel("Group (function/type)")
+                ax.set_title("DAG with Critical Path (3D, semantic axes)")
+                plt.show()
+            except ImportError:
+                print("mpl_toolkits.mplot3d is required for 3D visualization.")
+        else:
+            # 2D: project onto (line size, start line)
+            x_vals = {}
+            y_vals = {}
+            jitter = {}
+            for n, data in G.nodes(data=True):
+                lines = (data.get("lineno", 0), data.get("end_lineno", data.get("lineno", 0)))
+                x = max(1, lines[1] - lines[0] + 1)
+                group = node_groups[n]
+                if group not in jitter:
+                    jitter[group] = 0
+                # Spread nodes in the same group along y
+                y = data.get("lineno", 0) + 0.5 * jitter[group]
+                jitter[group] += 1
+                x_vals[n] = x
+                y_vals[n] = y
+
+            pos = {n: (x_vals[n], y_vals[n]) for n in G.nodes()}
+            plt.figure(figsize=(12, 8))
+            # Draw edges
+            nx.draw_networkx_edges(
+                G, pos,
+                edge_color=edge_colors,
+                width=[2 if c == "red" else 1 for c in edge_colors],
+                alpha=0.8,
+            )
+            # Draw nodes with fading
+            for i, n in enumerate(G.nodes()):
+                nx.draw_networkx_nodes(
+                    G, pos,
+                    nodelist=[n],
+                    node_color=node_colors[i],
+                    node_size=700,
+                    alpha=node_alphas[i]
+                )
+            nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=10, font_color="white")
+            plt.xlabel("Node Size (lines)")
+            plt.ylabel("Start Line (with group jitter)")
+            plt.title("DAG with Critical Path (2D, semantic axes)")
+            plt.axis("on")
+            if output_file:
+                plt.savefig(output_file, bbox_inches="tight")
+            plt.show()
 
     def generate_report(self, analysis: Dict) -> str:
         """
