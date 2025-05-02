@@ -1,0 +1,96 @@
+import multiprocessing as mp
+import threading
+from queue import Queue
+import time
+
+# Define the pipeline stages for TIP (Temporal Instruction Partitioning)
+{% for stage_num in range(1, stage_count+1) %}
+def stage{{ stage_num }}_function(input_queue, output_queue, num_workers):
+    """Stage {{ stage_num }} of the pipeline with multiple workers"""
+    # Create worker function
+    def worker():
+        while True:
+            # Get item from input queue
+            item = input_queue.get()
+            if item is None:  # Termination signal
+                input_queue.put(None)  # Forward to another worker
+                break
+                
+            # Process the item (original code from stage {{ stage_num }})
+            {% if stage_num == 1 %}
+            {{ stage1_body | indent(12) }}
+            {% elif stage_num == 2 %}
+            {{ stage2_body | indent(12) }}
+            {% elif stage_num == 3 %}
+            {{ stage3_body | indent(12) }}
+            {% else %}
+            result = process_stage{{ stage_num }}(item)
+            {% endif %}
+            
+            # Put result in output queue
+            output_queue.put(result)
+    
+    # Create and start worker threads
+    workers = []
+    for _ in range(num_workers):
+        t = threading.Thread(target=worker)
+        workers.append(t)
+        t.daemon = True
+        t.start()
+    
+    # Wait for all workers to finish
+    for w in workers:
+        w.join()
+    
+    # Send termination signal to next stage
+    output_queue.put(None)
+{% endfor %}
+
+def run_pipeline_tip(input_data):
+    """Run the pipeline with temporal instruction partitioning"""
+    # Create queues for communication between stages
+    queues = [mp.Queue() for _ in range({{ stage_count }}+1)]
+    
+    # Determine number of workers per stage based on workload characteristics
+    # More workers for compute-intensive stages, fewer for I/O-bound stages
+    stage_workers = [
+        {% for i in range(stage_count) %}
+        {{ 2 if i == 0 else 3 if i == 1 else 2 }},  # Stage {{ i+1 }} workers
+        {% endfor %}
+    ]
+    
+    # Create processes for each stage
+    processes = []
+    for i in range({{ stage_count }}):
+        p = mp.Process(target=stage{{ i+1 }}_function, 
+                      args=(queues[i], queues[i+1], stage_workers[i]))
+        processes.append(p)
+        p.start()
+    
+    # Feed input data to the first stage
+    for item in input_data:
+        queues[0].put(item)
+    
+    # Send termination signal
+    queues[0].put(None)
+    
+    # Collect results from the last stage
+    results = []
+    while True:
+        result = queues[-1].get()
+        if result is None:
+            break
+        results.append(result)
+    
+    # Wait for all processes to finish
+    for p in processes:
+        p.join()
+    
+    return results
+
+if __name__ == '__main__':
+    # Example usage with temporal instruction partitioning
+    input_data = {{ input_data }}
+    results = run_pipeline_tip(input_data)
+    print(f"Results: {results}")
+

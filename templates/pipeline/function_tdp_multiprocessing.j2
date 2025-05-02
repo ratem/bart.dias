@@ -1,0 +1,122 @@
+import multiprocessing as mp
+import numpy as np
+from queue import Queue
+import time
+
+def {{ func_name }}_parallel_tdp({{ ", ".join(func_args) }}, batch_size=None):
+    """
+    Parallel implementation of {{ func_name }} using a pipeline pattern with
+    Temporal Domain Partitioning (TDP).
+    
+    This divides the function into stages that run in parallel, with each stage
+    processing batches of data to improve throughput.
+    """
+    # Define the pipeline stages with temporal partitioning
+    {% for stage_num in range(1, stage_count+1) %}
+    def stage{{ stage_num }}_function(input_queue, output_queue, batch_size):
+        """Stage {{ stage_num }} of the pipeline with temporal batching"""
+        while True:
+            # Collect a batch of items
+            batch = []
+            for _ in range(batch_size):
+                item = input_queue.get()
+                if item is None:  # Termination signal
+                    # Process remaining items in batch
+                    if batch:
+                        results = []
+                        for batch_item in batch:
+                            {% if stage_num == 1 %}
+                            {{ stage1_body | indent(28) | replace('item', 'batch_item') }}
+                            {% elif stage_num == 2 %}
+                            {{ stage2_body | indent(28) | replace('item', 'batch_item') }}
+                            {% elif stage_num == 3 %}
+                            {{ stage3_body | indent(28) | replace('item', 'batch_item') }}
+                            {% else %}
+                            result = process_stage{{ stage_num }}(batch_item)
+                            {% endif %}
+                            results.append(result)
+                        
+                        for result in results:
+                            output_queue.put(result)
+                    
+                    # Forward termination signal
+                    output_queue.put(None)
+                    break
+                
+                batch.append(item)
+                
+                # Process batch if it reaches the batch size
+                if len(batch) == batch_size:
+                    results = []
+                    for batch_item in batch:
+                        {% if stage_num == 1 %}
+                        {{ stage1_body | indent(24) | replace('item', 'batch_item') }}
+                        {% elif stage_num == 2 %}
+                        {{ stage2_body | indent(24) | replace('item', 'batch_item') }}
+                        {% elif stage_num == 3 %}
+                        {{ stage3_body | indent(24) | replace('item', 'batch_item') }}
+                        {% else %}
+                        result = process_stage{{ stage_num }}(batch_item)
+                        {% endif %}
+                        results.append(result)
+                    
+                    for result in results:
+                        output_queue.put(result)
+                    
+                    batch = []
+    {% endfor %}
+    
+    # Determine input data
+    {% if is_class_method %}
+    input_data = {{ func_args[1] }}
+    {% else %}
+    input_data = {{ func_args[0] }}
+    {% endif %}
+    
+    # Determine optimal batch size if not provided
+    if batch_size is None:
+        batch_size = max(1, len(input_data) // (mp.cpu_count() * 2))
+    
+    # Create queues for communication between stages
+    queues = [mp.Queue() for _ in range({{ stage_count }}+1)]
+    
+    # Create processes for each stage
+    processes = []
+    for i in range({{ stage_count }}):
+        p = mp.Process(target=stage{{ i+1 }}_function, 
+                      args=(queues[i], queues[i+1], batch_size))
+        processes.append(p)
+        p.start()
+    
+    # Feed input data to the first stage
+    for item in input_data:
+        queues[0].put(item)
+    
+    # Send termination signal
+    queues[0].put(None)
+    
+    # Collect results from the last stage
+    results = []
+    while True:
+        result = queues[-1].get()
+        if result is None:
+            break
+        results.append(result)
+    
+    # Wait for all processes to finish
+    for p in processes:
+        p.join()
+    
+    return results
+
+if __name__ == '__main__':
+    # Example usage with temporal domain partitioning
+    {% if is_class_method %}
+    # For class methods, create an instance first
+    instance = {{ class_name }}()
+    result = instance.{{ func_name }}_parallel_tdp({{ func_args[1] if func_args|length > 1 else "data" }})
+    {% else %}
+    # For regular functions
+    result = {{ func_name }}_parallel_tdp({{ func_args[0] if func_args else "data" }})
+    {% endif %}
+

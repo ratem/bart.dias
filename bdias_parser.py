@@ -673,3 +673,146 @@ class BDiasParser:
             return False
 
         return True
+
+    def get_pattern_context(self, code_block):
+        """
+        Get the complete context for a code block to enable accurate pattern detection.
+        This method provides enhanced contextual information about a code block,
+        including its containing function, surrounding code blocks, and data flow.
+
+        Args:
+            code_block: Dictionary containing code block information (from _identify_patterns)
+
+        Returns:
+            Dictionary containing contextual information including:
+            - containing_function: The function containing this block (if any)
+            - preceding_blocks: Code blocks that precede this one in the same scope
+            - following_blocks: Code blocks that follow this one in the same scope
+            - buffer_vars: Variables that might serve as buffers between stages
+            - data_flow: Data dependencies between this block and others
+        """
+        context = {
+            "containing_function": None,
+            "preceding_blocks": [],
+            "following_blocks": [],
+            "buffer_vars": set(),
+            "data_flow": []
+        }
+
+        # If no code block provided or tree not available, return empty context
+        if not code_block or not hasattr(self, 'tree'):
+            return context
+
+        block_lineno = code_block.get('lineno', 0)
+        block_type = code_block.get('type', '')
+
+        # Find containing function
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef):
+                func_start = node.lineno
+                func_end = self._get_end_line(node)
+
+                # Check if block is inside this function
+                if func_start <= block_lineno <= func_end:
+                    context["containing_function"] = {
+                        "name": node.name,
+                        "lineno": func_start,
+                        "end_lineno": func_end,
+                        "source": ast.unparse(node)
+                    }
+                    break
+
+        # Find preceding and following blocks in the same scope
+        if context["containing_function"]:
+            func_source = context["containing_function"]["source"]
+            func_tree = ast.parse(func_source)
+
+            # Extract all blocks in the function
+            blocks_in_func = []
+            for subnode in ast.walk(func_tree):
+                if isinstance(subnode, ast.For):
+                    blocks_in_func.append({
+                        "type": "for_loop",
+                        "lineno": subnode.lineno + context["containing_function"]["lineno"] - 1,
+                        "end_lineno": self._get_end_line(subnode) + context["containing_function"]["lineno"] - 1,
+                        "source": ast.unparse(subnode),
+                        "node": subnode
+                    })
+                elif isinstance(subnode, ast.While):
+                    blocks_in_func.append({
+                        "type": "while_loop",
+                        "lineno": subnode.lineno + context["containing_function"]["lineno"] - 1,
+                        "end_lineno": self._get_end_line(subnode) + context["containing_function"]["lineno"] - 1,
+                        "source": ast.unparse(subnode),
+                        "node": subnode
+                    })
+
+            # Sort blocks by line number
+            blocks_in_func.sort(key=lambda x: x["lineno"])
+
+            # Identify preceding and following blocks
+            for i, block in enumerate(blocks_in_func):
+                if block["lineno"] < block_lineno:
+                    context["preceding_blocks"].append(block)
+                elif block["lineno"] > block_lineno:
+                    context["following_blocks"].append(block)
+
+        # Identify potential buffer variables (variables defined in one block and used in another)
+        if context["containing_function"]:
+            func_tree = ast.parse(context["containing_function"]["source"])
+
+            # Find all variable assignments in the function
+            var_defs = {}  # Maps variables to the blocks that define them
+            var_uses = {}  # Maps variables to the blocks that use them
+
+            for subnode in ast.walk(func_tree):
+                if isinstance(subnode, ast.Assign):
+                    for target in subnode.targets:
+                        if isinstance(target, ast.Name):
+                            var_name = target.id
+                            if var_name not in var_defs:
+                                var_defs[var_name] = []
+                            var_defs[var_name].append(subnode.lineno)
+
+                elif isinstance(subnode, ast.Name) and isinstance(subnode.ctx, ast.Load):
+                    var_name = subnode.id
+                    if var_name not in var_uses:
+                        var_uses[var_name] = []
+                    var_uses[var_name].append(subnode.lineno)
+
+            # Identify variables that might be buffers (defined in one block, used in another)
+            for var_name, def_lines in var_defs.items():
+                if var_name in var_uses:
+                    # Check if variable is defined in one block and used in another
+                    for def_line in def_lines:
+                        for use_line in var_uses[var_name]:
+                            if def_line < use_line:
+                                context["buffer_vars"].add(var_name)
+                                context["data_flow"].append({
+                                    "variable": var_name,
+                                    "defined_at": def_line,
+                                    "used_at": use_line
+                                })
+
+        return context
+
+    from typing import Dict, List, Any
+    def get_all_functions(self, code: str) -> List[Dict[str, Any]]:
+        """
+        Return the AST and metadata for every FunctionDef in the code,
+        ignoring any parallelizability filters.
+        """
+        tree = ast.parse(code)
+        functions = []
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef):
+                start = node.lineno
+                end = getattr(node, 'end_lineno', self._get_end_line(node))
+                functions.append({
+                    'name': node.name,
+                    'type': 'function',
+                    'lineno': start,
+                    'end_lineno': end,
+                    'source': ast.unparse(node),
+                })
+        return functions
