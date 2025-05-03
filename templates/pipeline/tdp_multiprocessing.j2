@@ -1,102 +1,59 @@
 import multiprocessing as mp
-import numpy as np
 from queue import Queue
-import time
 
-# Define the pipeline stages with temporal partitioning
 {% for stage_num in range(1, stage_count+1) %}
-def stage{{ stage_num }}_function(input_queue, output_queue, batch_size):
-    """Stage {{ stage_num }} of the pipeline with temporal batching"""
+def stage{{stage_num}}_function(in_q, out_q, batch_size):
+    """Stage {{stage_num}} with temporal batching."""
     while True:
-        # Collect a batch of items
         batch = []
         for _ in range(batch_size):
-            item = input_queue.get()
-            if item is None:  # Termination signal
-                # Process remaining items in batch
-                if batch:
-                    results = []
-                    for batch_item in batch:
-                        {% if stage_num == 1 %}
-                        {{ stage1_body | indent(24) | replace('item', 'batch_item') }}
-                        {% elif stage_num == 2 %}
-                        {{ stage2_body | indent(24) | replace('item', 'batch_item') }}
-                        {% elif stage_num == 3 %}
-                        {{ stage3_body | indent(24) | replace('item', 'batch_item') }}
-                        {% else %}
-                        result = process_stage{{ stage_num }}(batch_item)
-                        {% endif %}
-                        results.append(result)
-                    
-                    for result in results:
-                        output_queue.put(result)
-                
-                # Forward termination signal
-                output_queue.put(None)
+            item = in_q.get()
+            if item is None:
                 break
-            
             batch.append(item)
-            
-            # Process batch if it reaches the batch size
-            if len(batch) == batch_size:
-                results = []
-                for batch_item in batch:
-                    {% if stage_num == 1 %}
-                    {{ stage1_body | indent(20) | replace('item', 'batch_item') }}
-                    {% elif stage_num == 2 %}
-                    {{ stage2_body | indent(20) | replace('item', 'batch_item') }}
-                    {% elif stage_num == 3 %}
-                    {{ stage3_body | indent(20) | replace('item', 'batch_item') }}
-                    {% else %}
-                    result = process_stage{{ stage_num }}(batch_item)
-                    {% endif %}
-                    results.append(result)
-                
-                for result in results:
-                    output_queue.put(result)
-                
-                batch = []
-{% endfor %}
 
-def run_pipeline_tdp(input_data, batch_size=5):
-    """Run the pipeline with temporal domain partitioning"""
-    # Create queues for communication between stages
-    queues = [mp.Queue() for _ in range({{ stage_count }}+1)]
-    
-    # Create processes for each stage
-    processes = []
-    for i in range({{ stage_count }}):
-        p = mp.Process(target=stage{{ i+1 }}_function, 
-                      args=(queues[i], queues[i+1], batch_size))
-        processes.append(p)
-        p.start()
-    
-    # Feed input data to the first stage
+        if not batch and item is None:
+            out_q.put(None)
+            break
+
+        # Process each batch_item
+        for batch_item in batch:
+            result = {{ stage_exprs[stage_num-1] | replace('item','batch_item') }}
+            out_q.put(result)
+        {% endfor %}
+
+def run_pipeline_tdp(input_data, batch_size=None):
+    """Run the pipeline with temporal domain partitioning."""
+    if batch_size is None:
+        batch_size = max(1, len(input_data) // (mp.cpu_count() * 2))
+
+    queues = [mp.Queue() for _ in range({{stage_count}} + 1)]
+    procs = []
+
+    {% for stage_num in range(1, stage_count+1) %}
+    p = mp.Process(
+        target=stage{{stage_num}}_function,
+        args=(queues[{{stage_num-1}}], queues[{{stage_num}}], batch_size)
+    )
+    p.start()
+    procs.append(p)
+    {% endfor %}
+
     for item in input_data:
         queues[0].put(item)
-    
-    # Send termination signal
     queues[0].put(None)
-    
-    # Collect results from the last stage
+
     results = []
     while True:
-        result = queues[-1].get()
-        if result is None:
+        out = queues[-1].get()
+        if out is None:
             break
-        results.append(result)
-    
-    # Wait for all processes to finish
-    for p in processes:
+        results.append(out)
+
+    for p in procs:
         p.join()
-    
     return results
 
 if __name__ == '__main__':
-    # Example usage with temporal domain partitioning
-    input_data = {{ input_data }}
-    # Determine optimal batch size based on data size and available processors
-    batch_size = max(1, len(input_data) // (mp.cpu_count() * 2))
-    results = run_pipeline_tdp(input_data, batch_size)
-    print(f"Results: {results}")
-
+    data = {{input_data}}
+    print(run_pipeline_tdp(data))

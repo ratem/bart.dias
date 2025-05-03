@@ -799,20 +799,24 @@ class BDiasParser:
     from typing import Dict, List, Any
     def get_all_functions(self, code: str) -> List[Dict[str, Any]]:
         """
-        Return the AST and metadata for every FunctionDef in the code,
-        ignoring any parallelizability filters.
+        Return every FunctionDef in the source code, with its full source text
+        and line span, so pipelines can be detected even when loops have
+        dependencies.
         """
         tree = ast.parse(code)
-        functions = []
+        funcs = []
         for node in tree.body:
             if isinstance(node, ast.FunctionDef):
                 start = node.lineno
-                end = getattr(node, 'end_lineno', self._get_end_line(node))
-                functions.append({
+                # collect only subnodes that have a lineno attribute
+                linenos = [n.lineno for n in ast.walk(node) if hasattr(n, 'lineno')]
+                end = max(linenos) if linenos else start
+                funcs.append({
                     'name': node.name,
                     'type': 'function',
                     'lineno': start,
                     'end_lineno': end,
-                    'source': ast.unparse(node),
+                    'source': ast.unparse(node)
                 })
-        return functions
+        return funcs
+

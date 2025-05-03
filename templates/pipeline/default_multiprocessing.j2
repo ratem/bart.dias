@@ -1,70 +1,57 @@
 import multiprocessing as mp
 from queue import Queue
-import time
 
-# Define the pipeline stages
 {% for stage_num in range(1, stage_count+1) %}
-def stage{{ stage_num }}_function(input_queue, output_queue):
-    """Stage {{ stage_num }} of the pipeline"""
+def stage{{stage_num}}_function(in_q, out_q):
+    """Stage {{stage_num}} of the pipeline."""
     while True:
-        # Get item from input queue
-        item = input_queue.get()
-        if item is None:  # Termination signal
-            output_queue.put(None)
+        item = in_q.get()
+        if item is None:
+            out_q.put(None)
             break
-            
-        # Process the item (original code from stage {{ stage_num }})
-        {% if stage_num == 1 %}
-        {{ stage1_body | indent(8) }}
-        {% elif stage_num == 2 %}
-        {{ stage2_body | indent(8) }}
-        {% elif stage_num == 3 %}
-        {{ stage3_body | indent(8) }}
-        {% else %}
-        result = process_stage{{ stage_num }}(item)
-        {% endif %}
-        
-        # Put result in output queue
-        output_queue.put(result)
+
+        # process item
+{% for line in stage_bodies[stage_num-1] %}
+        {{ line }}
+{% endfor %}
+        out_q.put(item)
 {% endfor %}
 
 def run_pipeline(input_data):
-    """Run the pipeline with the given input data"""
-    # Create queues for communication between stages
-    queues = [mp.Queue() for _ in range({{ stage_count }}+1)]
-    
-    # Create processes for each stage
-    processes = []
-    for i in range({{ stage_count }}):
-        p = mp.Process(target=stage{{ i+1 }}_function, 
-                      args=(queues[i], queues[i+1]))
-        processes.append(p)
-        p.start()
-    
-    # Feed input data to the first stage
+    """Run the pipeline on input_data."""
+    # Create queues: one per stage plus one for final output
+    queues = [mp.Queue() for _ in range({{stage_count}} + 1)]
+    procs = []
+
+    # Launch each stage as a separate process
+    {% for stage_num in range(1, stage_count+1) %}
+    p = mp.Process(
+        target=stage{{stage_num}}_function,
+        args=(queues[{{stage_num-1}}], queues[{{stage_num}}])
+    )
+    p.start()
+    procs.append(p)
+    {% endfor %}
+
+    # Feed input data into the first stage
     for item in input_data:
         queues[0].put(item)
-    
-    # Send termination signal
     queues[0].put(None)
-    
+
     # Collect results from the last stage
     results = []
     while True:
-        result = queues[-1].get()
-        if result is None:
+        out = queues[-1].get()
+        if out is None:
             break
-        results.append(result)
-    
-    # Wait for all processes to finish
-    for p in processes:
+        results.append(out)
+
+    # Wait for all stages to finish
+    for p in procs:
         p.join()
-    
+
     return results
 
 if __name__ == '__main__':
-    # Example usage
-    input_data = {{ input_data }}
-    results = run_pipeline(input_data)
-    print(f"Results: {results}")
-
+    data = {{input_data}}
+    print(run_pipeline(data))

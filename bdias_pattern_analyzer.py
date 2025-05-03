@@ -209,26 +209,14 @@ class BDiasPatternAnalyzer:
         }
 
     def analyze(self, code: str) -> Dict[str, Any]:
-        """
-        Analyze the code to identify parallel patterns based on the
-        Pattern Characteristic Matrix.
-
-        Args:
-            code: The Python code to analyze
-
-        Returns:
-            Dictionary containing identified patterns and their characteristics
-        """
-        # Get the structured code from the parser
+        # 1) parse entire code
         structured_code = self.parser.parse(code)
-
-        # Identify patterns in the structured code
-        identified_patterns = self._identify_patterns(structured_code, code)
-
-        # Analyze pattern characteristics
-        pattern_analysis = self._analyze_pattern_characteristics(identified_patterns, structured_code)
-
+        # 2) identify patterns, now passing both structured and raw source
+        identified = self._identify_patterns(structured_code, code)
+        # 3) build full analysis bundle
+        pattern_analysis = self._analyze_pattern_characteristics(identified, structured_code)
         return pattern_analysis
+
 
     def _identify_patterns(self,
                            structured_code: Dict[str, List],

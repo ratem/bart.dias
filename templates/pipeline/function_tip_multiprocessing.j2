@@ -1,114 +1,61 @@
 import multiprocessing as mp
-import threading
 from queue import Queue
-import time
+import threading
 
-def {{ func_name }}_parallel_tip({{ ", ".join(func_args) }}):
-    """
-    Parallel implementation of {{ func_name }} using a pipeline pattern with
-    Temporal Instruction Partitioning (TIP).
-    
-    This divides the function into stages that run in parallel, with each stage
-    having multiple workers to process items concurrently.
-    """
-    # Define the pipeline stages for TIP (Temporal Instruction Partitioning)
+def {{func_name}}_parallel_tip({{func_args|join(', ')}}):
+    """Pipeline TIP version of {{func_name}}."""
+    stage_workers = [mp.cpu_count() for _ in range({{stage_count}})]
+
     {% for stage_num in range(1, stage_count+1) %}
-    def stage{{ stage_num }}_function(input_queue, output_queue, num_workers):
-        """Stage {{ stage_num }} of the pipeline with multiple workers"""
-        # Create worker function
+    def stage{{stage_num}}_function(in_q, out_q, nw):
         def worker():
             while True:
-                # Get item from input queue
-                item = input_queue.get()
-                if item is None:  # Termination signal
-                    input_queue.put(None)  # Forward to another worker
+                item = in_q.get()
+                if item is None:
+                    in_q.put(None)
                     break
-                    
-                # Process the item (original code from stage {{ stage_num }})
-                {% if stage_num == 1 %}
-                {{ stage1_body | indent(16) }}
-                {% elif stage_num == 2 %}
-                {{ stage2_body | indent(16) }}
-                {% elif stage_num == 3 %}
-                {{ stage3_body | indent(16) }}
-                {% else %}
-                result = process_stage{{ stage_num }}(item)
-                {% endif %}
-                
-                # Put result in output queue
-                output_queue.put(result)
-        
-        # Create and start worker threads
-        workers = []
-        for _ in range(num_workers):
+{% for line in stage_bodies[stage_num-1] %}
+                {{ line }}
+{% endfor %}
+                out_q.put(item)
+
+        threads = []
+        for _ in range(nw):
             t = threading.Thread(target=worker)
-            workers.append(t)
             t.daemon = True
             t.start()
-        
-        # Wait for all workers to finish
-        for w in workers:
-            w.join()
-        
-        # Send termination signal to next stage
-        output_queue.put(None)
+            threads.append(t)
+        for t in threads:
+            t.join()
+        out_q.put(None)
     {% endfor %}
-    
-    # Determine input data
-    {% if is_class_method %}
-    input_data = {{ func_args[1] }}
-    {% else %}
-    input_data = {{ func_args[0] }}
-    {% endif %}
-    
-    # Create queues for communication between stages
-    queues = [mp.Queue() for _ in range({{ stage_count }}+1)]
-    
-    # Determine number of workers per stage based on workload characteristics
-    # More workers for compute-intensive stages, fewer for I/O-bound stages
-    stage_workers = [
-        {% for i in range(stage_count) %}
-        {{ 2 if i == 0 else 3 if i == 1 else 2 }},  # Stage {{ i+1 }} workers
-        {% endfor %}
-    ]
-    
-    # Create processes for each stage
-    processes = []
-    for i in range({{ stage_count }}):
-        p = mp.Process(target=stage{{ i+1 }}_function, 
-                      args=(queues[i], queues[i+1], stage_workers[i]))
-        processes.append(p)
-        p.start()
-    
-    # Feed input data to the first stage
-    for item in input_data:
+
+    queues = [mp.Queue() for _ in range({{stage_count}} + 1)]
+    procs = []
+
+    {% for stage_num in range(1, stage_count+1) %}
+    p = mp.Process(
+        target=stage{{stage_num}}_function,
+        args=(queues[{{stage_num-1}}], queues[{{stage_num}}], stage_workers[{{stage_num-1}}])
+    )
+    p.start()
+    procs.append(p)
+    {% endfor %}
+
+    for item in {{func_args[0]}}:
         queues[0].put(item)
-    
-    # Send termination signal
     queues[0].put(None)
-    
-    # Collect results from the last stage
+
     results = []
     while True:
-        result = queues[-1].get()
-        if result is None:
+        out = queues[-1].get()
+        if out is None:
             break
-        results.append(result)
-    
-    # Wait for all processes to finish
-    for p in processes:
+        results.append(out)
+
+    for p in procs:
         p.join()
-    
     return results
 
 if __name__ == '__main__':
-    # Example usage with temporal instruction partitioning
-    {% if is_class_method %}
-    # For class methods, create an instance first
-    instance = {{ class_name }}()
-    result = instance.{{ func_name }}_parallel_tip({{ func_args[1] if func_args|length > 1 else "data" }})
-    {% else %}
-    # For regular functions
-    result = {{ func_name }}_parallel_tip({{ func_args[0] if func_args else "data" }})
-    {% endif %}
-
+    print({{func_name}}_parallel_tip({{func_args[0]}}))

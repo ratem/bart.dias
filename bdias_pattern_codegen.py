@@ -360,6 +360,42 @@ class MapReducePatternTransformer(BDiasPatternTransformer):
             return template.render(**self.context)
 
 
+class PipelinePatternTransformer(BDiasPatternTransformer):
+    """
+    Transformer for Pipeline pattern.
+    Extracts sequential for‐loops inside the function and stages them.
+    """
+
+    class PipelinePatternTransformer(BDiasPatternTransformer):
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+            if not (self.bottleneck.get('type') == 'function'
+                    and node.lineno == self.bottleneck['lineno']):
+                return node
+
+            loops = [stmt for stmt in node.body if isinstance(stmt, ast.For)]
+            stage_exprs = []
+            for loop in loops:
+                for stmt in loop.body:
+                    if (isinstance(stmt, ast.Expr)
+                            and isinstance(stmt.value, ast.Call)
+                            and getattr(stmt.value.func, 'attr', '') == 'append'):
+                        # extract only the expression being appended
+                        stage_exprs.append(ast.unparse(stmt.value.args[0]).strip())
+                        break
+
+            func_args = [arg.arg for arg in node.args.args]
+            input_data = func_args[0] if func_args else 'data'
+            self.context.update({
+                'func_name': node.name,
+                'func_args': func_args,
+                'input_data': input_data,
+                'stage_count': len(stage_exprs),
+                'stage_exprs': stage_exprs
+            })
+            # Imports for pipeline templates
+            self.add_import('multiprocessing', None, None)
+            self.add_import('queue', 'Queue', None)
+            return node
 
 def generate_hardware_recommendations(context: Dict[str, Any]) -> str:
     """
@@ -397,52 +433,47 @@ def generate_hardware_recommendations(context: Dict[str, Any]) -> str:
     return "\n".join(recommendations)
 
 
-def generate_parallel_code(bottleneck: Dict[str, Any], pattern: str, partitioning_strategy: List[str]) -> \
-        Tuple[str, str, Dict[str, Any]]:
+def generate_parallel_code(
+    bottleneck: Dict[str, Any],
+    pattern: str,
+    partitioning_strategy: List[str]
+) -> Tuple[str, str, Dict[str, Any]]:
     """
-    Generate parallelized code for a bottleneck based on identified pattern.
-
-    This function creates a pattern-specific transformer for the given bottleneck
-    and pattern, applies the transformation, and generates parallelized code
-    using templates appropriate for the pattern and partitioning strategy.
-
-    Args:
-        bottleneck: Dictionary containing bottleneck information including:
-                    - source: The source code of the bottleneck
-                    - lineno: The line number of the bottleneck
-                    - type: The type of the bottleneck (function, for_loop, etc.)
-        pattern: Identified parallel pattern (e.g., 'map_reduce', 'stencil')
-        partitioning_strategy: List of recommended partitioning strategies
-                               (e.g., ['SDP', 'SIP'])
-
-    Returns:
-        Tuple of (original_code, transformed_code, context) where:
-        - original_code: The original source code of the bottleneck
-        - transformed_code: The parallelized code generated for the bottleneck
-        - context: Dictionary containing context information used for generation
-
-    Currently supported patterns:
-    - map_reduce: Transforms independent operations followed by associative reduction
-
-    The function automatically selects the appropriate transformer and templates
-    based on the pattern and partitioning strategy, and adapts the generated code
-    to the available hardware resources.
+    Dispatch to the correct transformer, run the AST pass, finalize imports,
+    then render the appropriate Jinja2 template with a fully-populated context.
     """
-
-    # Parse the bottleneck source code
     source_code = bottleneck['source']
     tree = ast.parse(source_code)
 
-    # Create appropriate transformer based on pattern
-    if pattern == 'map_reduce':
+    # 1. Instantiate the right transformer
+    if pattern == 'pipeline':
+        transformer = PipelinePatternTransformer(bottleneck, partitioning_strategy)
+    elif pattern == 'map_reduce':
         transformer = MapReducePatternTransformer(bottleneck, partitioning_strategy)
-    # Add more patterns as needed
+    else:
+        raise NotImplementedError(f"Pattern '{pattern}' not supported for code generation.")
 
-    # Apply the transformation
+    # 2. Run the AST transformer to build transformer.context
     transformer.visit(tree)
     transformer.finalize(tree)
 
-    # Generate code using the template
-    transformed_code = transformer.generate_code()
+    # 3. Select the template based on pattern and first strategy
+    strat = partitioning_strategy[0].lower()
+    template_name = f"{pattern}/{strat}_multiprocessing.j2"
+    try:
+        tpl = transformer.env.get_template(template_name)
+    except jinja2.exceptions.TemplateNotFound:
+        # fallback to default for the pattern
+        tpl = transformer.env.get_template(f"{pattern}/default_multiprocessing.j2")
+
+    # 4. Render the template with the populated context
+    transformed_code = tpl.render(**transformer.context)
+
+    # 5. Optionally add hardware recommendations into context
+    # (if your templates or presenter use them)
+    if hasattr(transformer, 'context'):
+        from multiprocessing import cpu_count
+        transformer.context.setdefault('processor_count', cpu_count())
 
     return source_code, transformed_code, transformer.context
+
