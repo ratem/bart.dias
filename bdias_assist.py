@@ -66,15 +66,6 @@ class BDiasAssist:
                 print(f"   Code: {bottleneck['source'][:50]}..." if len(
                     bottleneck['source']) > 50 else f"   Code: {bottleneck['source']}")
 
-        # Step 3: Provide overall recommendations based on critical path analysis
-        print("\nRecommendations based on Critical Path Analysis:")
-        if results['parallelism'] < 2:
-            print("- This code has limited inherent parallelism. Consider restructuring the algorithm.")
-        elif results['sequential_fraction'] > 0.1:
-            print("- The sequential fraction is significant. Focus on parallelizing the bottlenecks identified above.")
-        else:
-            print("- This code has good parallelism potential. Consider using task-based parallelism frameworks.")
-
         if results['bottlenecks']:
             print("- The critical path contains high-intensity sequential sections. Consider:")
             print("  1. Breaking down these sections into smaller, independent tasks")
@@ -187,23 +178,10 @@ class BDiasAssist:
                         "context": ctx
                     })
                     print("\n" + presentation)
-            else:
-                print("\n No specific parallel patterns identified for this bottleneck.")
 
-        # 5) Overall recommendations
-        print("\nRecommendations based on Critical Path Analysis:")
-        P = cp_results["parallelism"]
-        S = cp_results["sequential_fraction"]
-        if P < 2:
-            print("- Limited inherent parallelism; consider algorithmic redesign.")
-        elif S > 0.1:
-            print("- Significant sequential fraction; focus on parallelizing identified bottlenecks.")
-        else:
-            print("- Good parallelism potential; consider task-based frameworks.")
-
-        # 6) Optional DAG visualization
+        # 5) DAG visualization
         if input("\nVisualize DAG? (y/n): ").lower() == 'y':
-            cp_analyzer.visualize_dag(mode="2d")
+            cp_analyzer.visualize_dag(mode="3d")
 
     def _handle_pattern_based_code_generation(self, bottleneck, pattern, partitioning_strategy):
         """
