@@ -362,40 +362,51 @@ class MapReducePatternTransformer(BDiasPatternTransformer):
 
 class PipelinePatternTransformer(BDiasPatternTransformer):
     """
-    Transformer for Pipeline pattern.
-    Extracts sequential for‐loops inside the function and stages them.
+    Transformer for the Pipeline pattern.  It picks out the top-level
+    function whose name matches the bottleneck, extracts the append-expressions
+    from each stage, and populates context with:
+      - func_name, func_args, input_data
+      - stage_count, stage_exprs
     """
 
-    class PipelinePatternTransformer(BDiasPatternTransformer):
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
-            if not (self.bottleneck.get('type') == 'function'
-                    and node.lineno == self.bottleneck['lineno']):
-                return node
-
-            loops = [stmt for stmt in node.body if isinstance(stmt, ast.For)]
-            stage_exprs = []
-            for loop in loops:
-                for stmt in loop.body:
-                    if (isinstance(stmt, ast.Expr)
-                            and isinstance(stmt.value, ast.Call)
-                            and getattr(stmt.value.func, 'attr', '') == 'append'):
-                        # extract only the expression being appended
-                        stage_exprs.append(ast.unparse(stmt.value.args[0]).strip())
-                        break
-
-            func_args = [arg.arg for arg in node.args.args]
-            input_data = func_args[0] if func_args else 'data'
-            self.context.update({
-                'func_name': node.name,
-                'func_args': func_args,
-                'input_data': input_data,
-                'stage_count': len(stage_exprs),
-                'stage_exprs': stage_exprs
-            })
-            # Imports for pipeline templates
-            self.add_import('multiprocessing', None, None)
-            self.add_import('queue', 'Queue', None)
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        # Match by function name (bottleneck['name']), not by lineno/details.
+        if (self.bottleneck.get('type') != 'function'
+            or node.name != self.bottleneck.get('name')):
             return node
+
+        # Extract all for-loops in the function body
+        loops = [stmt for stmt in node.body if isinstance(stmt, ast.For)]
+        stage_exprs = []
+        for loop in loops:
+            # find the .append(...) call in this loop
+            for stmt in loop.body:
+                if (isinstance(stmt, ast.Expr)
+                    and isinstance(stmt.value, ast.Call)
+                    and getattr(stmt.value.func, 'attr', '') == 'append'):
+                    # unparse the single argument to append(...)
+                    expr = ast.unparse(stmt.value.args[0]).strip()
+                    stage_exprs.append(expr)
+                    break
+
+        # function arguments and input data
+        func_args = [arg.arg for arg in node.args.args]
+        input_data = func_args[0] if func_args else 'data'
+
+        # Populate context for templates
+        self.context.update({
+            'func_name':   node.name,
+            'func_args':   func_args,
+            'input_data':  input_data,
+            'stage_count': len(stage_exprs),
+            'stage_exprs': stage_exprs
+        })
+
+        # Common imports for pipeline code
+        self.add_import('multiprocessing', None, None)
+        self.add_import('queue', 'Queue', None)
+
+        return node
 
 def generate_hardware_recommendations(context: Dict[str, Any]) -> str:
     """

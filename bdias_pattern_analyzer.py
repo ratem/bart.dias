@@ -239,7 +239,12 @@ class BDiasPatternAnalyzer:
                     'type': 'function',
                     'lineno': func['lineno'],
                     'confidence': 0.8,
-                    'details': func
+                    'details': {
+                        'name': func['name'],
+                        'source': func['source'],
+                        'lineno': func['lineno'],
+                        'end_lineno': func['end_lineno']
+                    }
                 })
                 # claim its lines so we won't treat its loops as map-reduce
                 pipeline_lines.update(range(func['lineno'], func['end_lineno'] + 1))
