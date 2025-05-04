@@ -468,14 +468,24 @@ def generate_parallel_code(
     transformer.visit(tree)
     transformer.finalize(tree)
 
-    # 3. Select the template based on pattern and first strategy
+    # 3. Select the template based on pattern, function status, and strategy
+    # Unified logic for all patterns
+    is_function = 'func_name' in transformer.context
     strat = partitioning_strategy[0].lower()
-    template_name = f"{pattern}/{strat}_multiprocessing.j2"
+
+    if is_function:
+        template_name = f"{pattern}/function_{strat}_multiprocessing.j2"
+    else:
+        template_name = f"{pattern}/{strat}_multiprocessing.j2"
+
     try:
         tpl = transformer.env.get_template(template_name)
     except jinja2.exceptions.TemplateNotFound:
-        # fallback to default for the pattern
-        tpl = transformer.env.get_template(f"{pattern}/default_multiprocessing.j2")
+        # Fallback to appropriate default template
+        if is_function:
+            tpl = transformer.env.get_template(f"{pattern}/function_default_multiprocessing.j2")
+        else:
+            tpl = transformer.env.get_template(f"{pattern}/default_multiprocessing.j2")
 
     # 4. Render the template with the populated context
     transformed_code = tpl.render(**transformer.context)

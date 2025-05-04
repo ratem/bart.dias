@@ -59,14 +59,14 @@ class BDiasPatternAnalyzer:
                 }
             },
             "pipeline": {
-                "structure": ["sequential_loops_with_dependencies", "producer_consumer_pattern"],
+                "structure": ["sequential_assignments", "stage_buffers", "data_flow"],
                 "data_access": "streaming",
                 "communication": "neighbor_only",
                 "synchronization": "pipelined",
                 "parallelism": "task_parallel",
                 "suitable_partitioning": ["TDP", "TIP"],
                 "performance": {
-                    "work": "O(n)",
+                    "work": "O(n*s)",  # s=stages
                     "span": "O(s + n)",
                     "parallelism": "O(min(s, n/s))"
                 }
@@ -217,6 +217,20 @@ class BDiasPatternAnalyzer:
         pattern_analysis = self._analyze_pattern_characteristics(identified, structured_code)
         return pattern_analysis
 
+    def _get_pipeline_stages(self, node):
+        """Identify explicit pipeline stages with buffer variables"""
+        stages = []
+        current_buffer = None
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assign) and \
+                    isinstance(stmt.targets[0], ast.Name) and \
+                    stmt.targets[0].id.endswith(('buffer', 'stage', 'result')):
+                stages.append(stmt)
+                current_buffer = stmt.targets[0].id
+            elif current_buffer and isinstance(stmt, ast.For):
+                stages.append(stmt)
+        return stages
+
 
     def _identify_patterns(self,
                            structured_code: Dict[str, List],
@@ -234,11 +248,12 @@ class BDiasPatternAnalyzer:
         # --- 1. PIPELINE: detect *all* functions from the raw code ---
         pipeline_lines = set()
         for func in self.parser.get_all_functions(raw_code):
-            if self._has_producer_consumer_pattern(func):
+            # Add the new pipeline stages check
+            if self._has_producer_consumer_pattern(func) and len(self._get_pipeline_stages(func['node'])) >= 2:
                 identified_patterns['pipeline'].append({
                     'type': 'function',
                     'lineno': func['lineno'],
-                    'confidence': 0.8,
+                    'confidence': 0.85,  # Increased confidence
                     'details': {
                         'name': func['name'],
                         'source': func['source'],
@@ -248,7 +263,6 @@ class BDiasPatternAnalyzer:
                 })
                 # claim its lines so we won't treat its loops as map-reduce
                 pipeline_lines.update(range(func['lineno'], func['end_lineno'] + 1))
-
         # --- 2. MAP-REDUCE: skip loops inside any claimed pipeline function ---
         for loop in structured_code.get('loops', []):
             if loop['lineno'] in pipeline_lines:
@@ -457,17 +471,6 @@ class BDiasPatternAnalyzer:
                     "speedup_potential": "Limited by the slowest stage, up to O(s) for s stages."
                 })
 
-            # Reduction pattern
-            if has_reduction_pattern or has_accumulation_pattern:
-                suggested_patterns.append({
-                    "pattern": "reduction",
-                    "confidence": 0.85,
-                    "rationale": "The code block accumulates results, suitable for parallel reduction.",
-                    "partitioning": ["SDP", "SIP"],
-                    "description": "Combine multiple elements into a single result using an associative operation.",
-                    "speedup_potential": "O(log n) critical path with O(n/log n) parallelism."
-                })
-
             # Divide and Conquer pattern
             if has_divide_combine_pattern:
                 suggested_patterns.append({
@@ -603,54 +606,51 @@ class BDiasPatternAnalyzer:
         if not hasattr(node, '_fields'):
             return False
 
-        # Find all buffer variables (lists, deques, queues, arrays)
+        # Look for sequential stages with data flow
         buffer_vars = set()
+        producer_buffers = set()
+        consumer_buffers = set()
+        has_multiple_stages = False
+
+        # First, identify all buffer variables (lists or queues)
         for subnode in ast.walk(node):
             if isinstance(subnode, ast.Assign):
-                # Find list initializations: buffer = []
-                if isinstance(subnode.value, ast.List):
+                if isinstance(subnode.value, ast.List) or isinstance(subnode.value, ast.Call) and hasattr(
+                        subnode.value.func, 'id') and subnode.value.func.id in ['list', 'deque', 'Queue']:
                     for target in subnode.targets:
                         if isinstance(target, ast.Name):
                             buffer_vars.add(target.id)
-                # Find constructor calls: buffer = list(), buffer = deque(), etc.
-                elif isinstance(subnode.value, ast.Call) and hasattr(subnode.value.func, 'id'):
-                    if subnode.value.func.id in ['list', 'deque', 'Queue', 'array']:
-                        for target in subnode.targets:
-                            if isinstance(target, ast.Name):
-                                buffer_vars.add(target.id)
 
-        # Track stages (loops) and their buffer relationships
-        stages = []
+        # Look for loops that append to buffers (producers)
         for subnode in ast.walk(node):
             if isinstance(subnode, ast.For):
-                stage = {'writes': set(), 'reads': set(), 'node': subnode, 'lineno': subnode.lineno}
+                # Look for append operations inside the loop
+                for stmt in ast.iter_child_nodes(subnode):
+                    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                        if hasattr(stmt.value.func, 'attr') and stmt.value.func.attr == 'append':
+                            if hasattr(stmt.value.func.value, 'id') and stmt.value.func.value.id in buffer_vars:
+                                producer_buffers.add(stmt.value.func.value.id)
 
-                # Find writes to buffers in this loop (append, extend, etc.)
-                for stmt in ast.walk(subnode):
-                    if isinstance(stmt, ast.Call) and hasattr(stmt.func, 'attr'):
-                        if stmt.func.attr in ['append', 'extend', 'put']:
-                            if hasattr(stmt.func.value, 'id') and stmt.func.value.id in buffer_vars:
-                                stage['writes'].add(stmt.func.value.id)
-
-                # Find reads from buffers in this loop (iteration, get, etc.)
+        # Look for loops that consume from buffers
+        for subnode in ast.walk(node):
+            if isinstance(subnode, ast.For):
+                # Check if the loop iterates over a buffer
                 if hasattr(subnode.iter, 'id') and subnode.iter.id in buffer_vars:
-                    stage['reads'].add(subnode.iter.id)
+                    consumer_buffers.add(subnode.iter.id)
 
-                for stmt in ast.walk(subnode):
-                    if isinstance(stmt, ast.Subscript) and isinstance(stmt.value, ast.Name):
-                        if stmt.value.id in buffer_vars and isinstance(stmt.ctx, ast.Load):
-                            stage['reads'].add(stmt.value.id)
+        # Check if there's a producer-consumer relationship
+        has_pipeline = False
+        for buffer in buffer_vars:
+            if buffer in producer_buffers and buffer in consumer_buffers:
+                has_pipeline = True
+                break
 
-                stages.append(stage)
-
-        # Sort stages by line number to check for sequential order
-        stages.sort(key=lambda s: s['lineno'])
-
-        # Check for producer-consumer relationship between sequential stages
-        for i in range(len(stages) - 1):
-            if stages[i]['writes'] & stages[i + 1]['reads']:
-                # Found a pipeline: one stage writes to a buffer that the next stage reads from
-                return True
+        # Check for sequential stages (multiple loops)
+        loop_count = 0
+        for subnode in ast.walk(node):
+            if isinstance(subnode, ast.For):
+                loop_count += 1
+        has_multiple_stages = loop_count >= 2
 
         # Check for pipeline keywords in the code
         if isinstance(node, dict) and 'source' in node:
@@ -658,14 +658,21 @@ class BDiasPatternAnalyzer:
             if 'pipeline' in source or 'stage' in source:
                 return True
 
-        # Check for multiple stages with buffer variables
-        if len(stages) >= 2 and len(buffer_vars) >= 1:
-            # Count how many stages use buffer variables
-            buffer_using_stages = sum(1 for stage in stages if stage['reads'] or stage['writes'])
-            if buffer_using_stages >= 2:
-                return True
+        # Check for explicit pipeline stages through buffer variables
+        stage_count = self._count_pipeline_stages(node)
+        if stage_count >= 2:
+            return True
 
-        return False
+        # A pipeline pattern should have multiple stages and producer-consumer relationship
+        return has_multiple_stages and (has_pipeline or len(producer_buffers.intersection(consumer_buffers)) > 0)
+
+    def _count_pipeline_stages(self, node):
+        """Count explicit pipeline stages through buffer variables"""
+        buffer_vars = {'input', 'output', 'buffer', 'stage', 'result'}
+        return sum(1 for stmt in ast.walk(node)
+                   if isinstance(stmt, ast.Assign)
+                   and isinstance(stmt.targets[0], ast.Name)
+                   and any(name in stmt.targets[0].id for name in buffer_vars))
 
     def _detect_sequential_stages(self, node):
         """
