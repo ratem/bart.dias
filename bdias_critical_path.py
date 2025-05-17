@@ -41,6 +41,7 @@ Dependencies:
 import ast
 import networkx as nx
 from typing import Dict, List, Tuple, Any, Set, Optional
+import io, base64
 
 
 class BDiasCriticalPathAnalyzer:
@@ -603,6 +604,7 @@ class BDiasCriticalPathAnalyzer:
             mode: str = "2d",
             critical_path_nodes: Optional[set] = None,
             critical_path_edges: Optional[set] = None,
+            output_base64: Optional[bool] = False,
     ) -> None:
         """
         Visualize the DAG, coloring critical path nodes and edges in red, others in blue/gray.
@@ -745,7 +747,16 @@ class BDiasCriticalPathAnalyzer:
                 ax.set_ylabel("Start Line")
                 ax.set_zlabel("Group (function/type)")
                 ax.set_title("DAG with Critical Path (3D, semantic axes)")
-                plt.show()
+                if output_base64:
+                    buf = io.BytesIO()
+                    plt.savefig(buf, format='png')
+                    buf.seek(0)
+                    string = base64.b64encode(buf.read()).decode('utf-8')
+                    print("BASE64 IMAGE START")
+                    print(string)
+                    print("BASE64 IMAGE END")
+                else:
+                    plt.show()
             except ImportError:
                 print("mpl_toolkits.mplot3d is required for 3D visualization.")
         else:
@@ -790,7 +801,16 @@ class BDiasCriticalPathAnalyzer:
             plt.axis("on")
             if output_file:
                 plt.savefig(output_file, bbox_inches="tight")
-            plt.show()
+            if output_base64:
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png')
+                buf.seek(0)
+                string = base64.b64encode(buf.read()).decode('utf-8')
+                print("BASE64 IMAGE START")
+                print(string)
+                print("BASE64 IMAGE END")
+            else:
+                plt.show()
 
     def generate_report(self, analysis: Dict) -> str:
         """

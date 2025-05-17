@@ -74,7 +74,7 @@ class BDiasAssist:
 
         # Offer visualization option
         if input("\nVisualize DAG? (y/n): ").lower() == 'y':
-            critical_path_analyzer.visualize_dag(mode="3d")
+            critical_path_analyzer.visualize_dag(mode="3d", output_base64=True)
 
 
     def _handle_pattern_analysis(self, pattern_analysis, code):
