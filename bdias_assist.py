@@ -181,7 +181,7 @@ class BDiasAssist:
 
         # 5) DAG visualization
         if input("\nVisualize DAG? (y/n): ").lower() == 'y':
-            cp_analyzer.visualize_dag(mode="3d")
+            cp_analyzer.visualize_dag(mode="3d", output_base64=True)
 
     def _handle_pattern_based_code_generation(self, bottleneck, pattern, partitioning_strategy):
         """
