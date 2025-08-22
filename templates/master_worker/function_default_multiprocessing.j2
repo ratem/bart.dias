@@ -1,0 +1,29 @@
+{# templates/master_worker/function_default_multiprocessing.j2 #}
+import multiprocessing as mp
+
+def {{func_name}}_parallel({{func_args|join(", ")}}{% if func_args|length == 0 %}data{% endif %}, batch_size=None):
+    """
+    Master-Worker (pool of workers) gerado automaticamente para {{func_name}}.
+    Estratégia: default → usa mp.Pool.map sobre {{input_data}}.
+    """
+    # Define worker que aplica a expressão extraída do append(...)
+    def _worker_item(x):
+        {% if pred_expr %}
+        if not ({{pred_expr}}):
+            return None
+        {% endif %}
+        return ({{task_expr}})
+
+    # Garante que temos algo iterável
+    data_iter = {{input_data}}
+
+    # Tamanho do pool
+    nprocs = max(1, mp.cpu_count())
+    with mp.Pool(processes=nprocs) as pool:
+        mapped = pool.map(_worker_item, data_iter)
+
+    # Filtra Nones se houver predicado e preserva ordem
+    if any(m is None for m in mapped):
+        mapped = [m for m in mapped if m is not None]
+
+    return mapped

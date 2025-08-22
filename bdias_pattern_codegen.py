@@ -676,6 +676,8 @@ def generate_parallel_code(
         transformer = PipelinePatternTransformer(bottleneck, partitioning_strategy)
     elif pattern == 'map_reduce':
         transformer = MapReducePatternTransformer(bottleneck, partitioning_strategy)
+    elif pattern in ('master_worker', 'pool_workers', 'worker_pool'):
+        transformer = MasterWorkerPatternTransformer(bottleneck, partitioning_strategy)
     else:
         raise NotImplementedError(f"Pattern '{pattern}' not supported for code generation.")
 
@@ -716,3 +718,57 @@ def generate_parallel_code(
 
     return source_code, transformed_code, transformer.context
 
+
+
+# ======== Pool of workers
+
+class MasterWorkerPatternTransformer(BDiasPatternTransformer):
+    """
+    Gera uma versão paralela (pool of workers) para funções com padrão
+    master-worker: um loop que consome itens de uma coleção e produz
+    um resultado por item (append em um buffer/resultado).
+    Extrai a expressão do "append(...)" e, se existir, um predicado "if".
+    """
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        # só a função-alvo
+        if (self.bottleneck.get('type') != 'function'
+            or node.name != self.bottleneck.get('name')):
+            return node
+
+        func_args = [a.arg for a in node.args.args]
+        input_data = func_args[0] if func_args else 'data'
+
+        # 1) pegue o primeiro for top-level
+        first_for = next((st for st in node.body if isinstance(st, ast.For)), None)
+        if first_for is None:
+            raise ValueError(f"Master-Worker: não encontrei loop top-level em '{node.name}'.")
+
+        loop_var = getattr(first_for.target, 'id', None)
+
+        # 2) colete appends (expr, pred) dentro do for (usa seus helpers)
+        pairs = _collect_appends_with_pred(first_for.body, loop_var)
+        if not pairs:
+            raise ValueError("Master-Worker: loop não contém append(...) para extrair tarefa.")
+
+        # Heurística simples: use o primeiro append do loop
+        expr_node, pred_node = pairs[0]
+        task_expr = _src(expr_node)
+        pred_expr = _src(pred_node) if pred_node is not None else None
+
+        # Contexto para template
+        self.context.update({
+            'pattern': 'master_worker',
+            'func_name': node.name,
+            'func_args': func_args,
+            'input_data': input_data,
+            'loop_var': loop_var or 'x',
+            'task_expr': task_expr,     # ex.: "(x*2 + 10)"
+            'pred_expr': pred_expr,     # ex.: "x % 2 == 0" (ou None)
+            'is_class_method': func_args and func_args[0] == 'self',
+            'partitioning_strategy': self.partitioning_strategy,
+        })
+
+        # Imports (multiprocessing)
+        self.add_import('multiprocessing', None, None)
+        return node

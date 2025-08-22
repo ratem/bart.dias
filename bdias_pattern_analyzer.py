@@ -215,6 +215,8 @@ class BDiasPatternAnalyzer:
             }
         }
 
+        self.pattern_matrix["pool"] = self.pattern_matrix["master_worker"]
+
         # Pattern detection rules - map_reduce code structures to pattern indicators
         self.pattern_detection_rules = self._initialize_detection_rules()
 
@@ -300,7 +302,7 @@ class BDiasPatternAnalyzer:
         Returns:
             Dictionary mapping pattern names to detection criteria
         """
-        return {
+        rules = {
             "map_reduce": {
                 "indicators": [
                     {"type": "loop", "has_dependencies": False},
@@ -351,6 +353,8 @@ class BDiasPatternAnalyzer:
                 "confidence_threshold": 0.6
             }
         }
+        rules["pool"] = rules["master_worker"]
+        return rules
 
     def analyze(self, code: str) -> Dict[str, Any]:
         # 1) parse entire code
@@ -415,6 +419,8 @@ class BDiasPatternAnalyzer:
         """
         identified_patterns = {pattern: [] for pattern in self.pattern_matrix}
 
+        claimed_lines = set()
+
         # --- 1. PIPELINE: detect *all* functions from the raw code ---
         pipeline_lines = set()
         for func in self.parser.get_all_functions(raw_code):
@@ -476,10 +482,42 @@ class BDiasPatternAnalyzer:
                 pipeline_lines.update(range(func['lineno'], func['end_lineno'] + 1))
 
 
+
+        # --- 1C. POOL/MASTER-WORKER (map-only) → marcar ANTES do MR ---
+        for func in self.parser.get_all_functions(raw_code):
+            if 'node' not in func:
+                try:
+                    func_node = ast.parse(func['source']).body[0]
+                    func['node'] = func_node
+                except Exception:
+                    continue
+            else:
+                func_node = func['node']
+
+            # Evita sobrepor funções já reservadas
+            if any(func['lineno'] <= ln <= func['end_lineno'] for ln in claimed_lines):
+                continue
+
+            if self._is_map_only_function(func_node):
+                identified_patterns['pool'].append({
+                    'type': 'function',
+                    'lineno': func['lineno'],
+                    'confidence': 0.8,
+                    'details': {
+                        'name': func['name'],
+                        'source': func['source'],
+                        'lineno': func['lineno'],
+                        'end_lineno': func['end_lineno']
+                    }
+                })
+                claimed_lines.update(range(func['lineno'], func['end_lineno'] + 1))
+
+
         # --- 2. MAP-REDUCE: skip loops inside any claimed pipeline function ---
         for loop in structured_code.get('loops', []):
             if loop['lineno'] in pipeline_lines:
                 continue
+            
             if self._is_independent_loop(loop):
                 identified_patterns['map_reduce'].append({
                     'type': 'loop', 'lineno': loop['lineno'],
@@ -499,6 +537,8 @@ class BDiasPatternAnalyzer:
         # --- 3. MAP-REDUCE on functions not in pipeline ---
         for func in structured_code.get('functions', []):
             if func['lineno'] in pipeline_lines:
+                continue
+            if 'end_lineno' in func and any(func['lineno'] <= ln <= func['end_lineno'] for ln in claimed_lines):
                 continue
             if self._has_map_reduce_pattern(func):
                 identified_patterns['map_reduce'].append({
@@ -523,16 +563,6 @@ class BDiasPatternAnalyzer:
                     "lineno": loop["lineno"],
                     "confidence": 0.85,
                     "details": loop
-                })
-
-        # Master-Worker pattern
-        for function in structured_code.get("functions", []):
-            if self._has_task_distribution(function):
-                identified_patterns["master_worker"].append({
-                    "type": "function",
-                    "lineno": function["lineno"],
-                    "confidence": 0.7,
-                    "details": function
                 })
 
         # Fork-Join pattern
@@ -1178,6 +1208,46 @@ class BDiasPatternAnalyzer:
                 return True
 
         # A master-worker pattern should have task distribution and worker calls
+
+        # --- Heurística adicional (genérica) ---
+        # "for <var> in <arg0>:"  e corpo contém "results.append(...)" OU chamada de função com <var>
+        try:
+            if isinstance(node, dict) and 'source' in node:
+                node = ast.parse(node['source'])
+        except Exception:
+            return has_task_distribution and (has_worker_calls or has_task_collection)
+
+        if not hasattr(node, '_fields'):
+            return has_task_distribution and (has_worker_calls or has_task_collection)
+
+        # acha a função alvo para capturar os args
+        target_func = None
+        for f in ast.walk(node):
+            if isinstance(f, ast.FunctionDef):
+                target_func = f
+                break
+
+        if target_func and target_func.args.args:
+            arg0 = target_func.args.args[0].arg  # primeiro parâmetro (coleção de tarefas)
+            for st in target_func.body:
+                if isinstance(st, ast.For):
+                    itname = getattr(st.iter, 'id', None)
+                    if itname == arg0:  # consumindo a coleção de entrada
+                        # se tiver append em alg. buffer de resultados OU chamada de função com loop_var
+                        loop_var = getattr(st.target, 'id', None)
+                        saw_append = False
+                        saw_call_with_var = False
+                        for inner in ast.walk(st):
+                            if (isinstance(inner, ast.Call)
+                                and getattr(getattr(inner, 'func', None), 'attr', '') == 'append'):
+                                saw_append = True
+                            if isinstance(inner, ast.Call):
+                                # se loop_var aparece em qualquer arg de uma call → "trabalho"
+                                if any(isinstance(a, ast.Name) and a.id == loop_var for a in inner.args):
+                                    saw_call_with_var = True
+                        if saw_append or saw_call_with_var:
+                            return True
+
         return has_task_distribution and (has_worker_calls or has_task_collection)
 
 
@@ -1572,6 +1642,52 @@ class BDiasPatternAnalyzer:
 
 
     # Additional pattern detection helpers for AST-based analysis
+    def _is_map_only_function(self, node_or_dict) -> bool:
+        """
+        True se a função tem 'map' (for+append ou listcomp) e NÃO tem redução
+        (sum/min/max/reduce sobre o buffer intermediário, ou loop acumulando).
+        """
+        # normaliza para FunctionDef
+        if isinstance(node_or_dict, dict) and 'source' in node_or_dict:
+            try:
+                node = ast.parse(node_or_dict['source']).body[0]
+            except Exception:
+                return False
+        else:
+            node = node_or_dict
+        if not isinstance(node, ast.FunctionDef):
+            return False
+
+        has_map = False
+        inter_var = None
+
+        for n in ast.walk(node):
+            if isinstance(n, ast.Assign) and isinstance(n.value, ast.ListComp):
+                if n.targets and isinstance(n.targets[0], ast.Name):
+                    has_map = True
+                    inter_var = n.targets[0].id
+            elif isinstance(n, ast.For):
+                for inner in ast.walk(n):
+                    if isinstance(inner, ast.Call) and getattr(inner.func, 'attr', '') == 'append':
+                        has_map = True
+                        if isinstance(inner.func.value, ast.Name) and inter_var is None:
+                            inter_var = inner.func.value.id
+
+        has_reduce = False
+        if inter_var:
+            for n in ast.walk(node):
+                if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call):
+                    if getattr(n.value.func, 'id', None) in ('sum', 'min', 'max', 'reduce'):
+                        if any(isinstance(a, ast.Name) and a.id == inter_var for a in n.value.args):
+                            has_reduce = True
+                            break
+                if isinstance(n, ast.For) and getattr(n.iter, 'id', None) == inter_var:
+                    if any(isinstance(inner, ast.AugAssign) for inner in ast.walk(n)):
+                        has_reduce = True
+                        break
+
+        return has_map and not has_reduce
+
     def _has_nested_loops(self, node):
         """Check if a node contains nested loops."""
         outer_loops = []
