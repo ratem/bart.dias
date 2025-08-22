@@ -1,31 +1,40 @@
 import multiprocessing as mp
-from queue import Queue
 
-def {{func_name}}_parallel({{func_args|join(', ')}}):
-    """Parallel pipeline version of {{func_name}}."""
-    {% for stage_num in range(1, stage_count+1) %}
-    def stage{{stage_num}}_function(in_q, out_q):
+def {{func_name}}_parallel({{func_args|join(', ')}}, batch_size=None):
+    if batch_size is None:
+        try:
+            n = len({{func_args[0]}})
+        except Exception:
+            n = 0
+        batch_size = max(1, n // max(1, mp.cpu_count()*2))
+
+    {% for i in range(stage_count) %}
+    def stage{{i+1}}_fn(in_q, out_q, bs):
         while True:
-            item = in_q.get()
-            if item is None:
+            batch, saw_eof = [], False
+            for _ in range(bs):
+                x = in_q.get()
+                if x is None:
+                    saw_eof = True
+                    break
+                if ({{ stage_exprs[i]['pred'] if stage_exprs[i]['pred'] else 'True' }}):
+                    y = ({{ stage_exprs[i]['expr'] }})
+                    batch.append(y)
+            for y in batch:
+                out_q.put(y)
+            if saw_eof:
                 out_q.put(None)
                 break
-{% for line in stage_bodies[stage_num-1] %}
-            {{ line }}
-{% endfor %}
-            out_q.put(item)
     {% endfor %}
 
     queues = [mp.Queue() for _ in range({{stage_count}} + 1)]
     procs = []
-
-    {% for stage_num in range(1, stage_count+1) %}
-    p = mp.Process(
-        target=stage{{stage_num}}_function,
-        args=(queues[{{stage_num-1}}], queues[{{stage_num}}])
-    )
-    p.start()
-    procs.append(p)
+    {% for i in range(stage_count) %}
+    p{{i+1}} = mp.Process(target=stage{{i+1}}_fn,
+                         args=(queues[{{i}}], queues[{{i+1}}], batch_size))
+    p{{i+1}}.daemon = True
+    p{{i+1}}.start()
+    procs.append(p{{i+1}})
     {% endfor %}
 
     for item in {{func_args[0]}}:
@@ -39,9 +48,5 @@ def {{func_name}}_parallel({{func_args|join(', ')}}):
             break
         results.append(out)
 
-    for p in procs:
-        p.join()
+    for p in procs: p.join()
     return results
-
-if __name__ == '__main__':
-    print({{func_name}}_parallel({{func_args[0]}}))

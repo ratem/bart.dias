@@ -38,7 +38,7 @@ def map_nested():
 """
         for code in [code1, code2, code3]:
             structured_code = self.parser.parse(code)
-            identified_patterns = self.analyzer._identify_patterns(structured_code)
+            identified_patterns = self.analyzer._identify_patterns(structured_code,code)
             self.assertGreater(len(identified_patterns["map_reduce"]), 0)
 
     def test_stencil_pattern_direct(self):
@@ -75,7 +75,7 @@ def map_nested():
         self.assertTrue(has_neighbor, "Stencil pattern should have neighbor access")
 
         # Test pattern identification with the mock structured_code
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code,code)
         self.assertGreater(len(identified_patterns["stencil"]), 0)
 
     def test_pipeline_pattern_direct(self):
@@ -119,7 +119,7 @@ def map_nested():
         self.assertTrue(has_producer_consumer, "Pipeline pattern should be detected")
 
         # Test pattern identification with the mock structured_code
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code,code)
         self.assertGreater(len(identified_patterns["pipeline"]), 0)
 
 
@@ -156,7 +156,7 @@ def map_nested():
         self.assertTrue(has_independent_tasks, "Fork-join pattern should be detected")
 
         # Test pattern identification with the mock structured_code
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code,code)
         self.assertGreater(len(identified_patterns["fork_join"]), 0)
 
     def test_divide_conquer_pattern_direct(self):
@@ -199,7 +199,7 @@ def map_nested():
         self.assertTrue(has_divide_combine, "Divide and conquer pattern should be detected")
 
         # Test pattern identification with the mock structured_code
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code,code)
         self.assertGreater(len(identified_patterns["divide_conquer"]), 0)
 
     def test_master_worker_pattern_direct(self):
@@ -233,7 +233,7 @@ def map_nested():
         self.assertTrue(has_task_distribution, "Master-worker pattern should be detected")
 
         # Test pattern identification with the mock structured_code
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code,code)
         self.assertGreater(len(identified_patterns["master_worker"]), 0)
 
     def test_scatter_gather_pattern_direct(self):
@@ -274,5 +274,5 @@ def map_nested():
         self.assertTrue(has_distribution_collection, "Scatter-gather pattern should be detected")
 
         # Test pattern identification with the mock structured_code
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code,code)
         self.assertGreater(len(identified_patterns["scatter_gather"]), 0)

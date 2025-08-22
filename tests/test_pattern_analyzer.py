@@ -46,7 +46,7 @@ def map_reduce_function():
     return total
 """
         structured_code = self.parser.parse(code)
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code, code)
         self.assertGreater(len(identified_patterns["map_reduce"]), 0)
         self.assertGreaterEqual(identified_patterns["map_reduce"][0]["confidence"], 0.7)
 
@@ -77,7 +77,7 @@ def stencil_function(grid):
         loop_node = ast.parse(structured_code["loops"][0]["source"])
         has_neighbor = self.analyzer._has_neighbor_access(loop_node)
         self.assertTrue(has_neighbor, "Stencil pattern should have neighbor access")
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code, code)
         self.assertGreater(len(identified_patterns["stencil"]), 0)
 
     def test_pipeline_pattern_direct(self):
@@ -114,7 +114,7 @@ def pipeline_function():
         function_node = ast.parse(structured_code["functions"][0]["source"])
         has_producer_consumer = self.analyzer._has_producer_consumer_pattern(function_node)
         self.assertTrue(has_producer_consumer, "Pipeline pattern should be detected")
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code, code)
         self.assertGreater(len(identified_patterns["pipeline"]), 0)
 
     def test_pattern_characteristics_analysis(self):
@@ -134,7 +134,7 @@ def test_function():
     return result1, result2
 """
         structured_code = self.parser.parse(code)
-        identified_patterns = self.analyzer._identify_patterns(structured_code)
+        identified_patterns = self.analyzer._identify_patterns(structured_code, code)
         pattern_analysis = self.analyzer._analyze_pattern_characteristics(identified_patterns, structured_code)
         self.assertIn("identified_patterns", pattern_analysis)
         self.assertIn("recommended_partitioning", pattern_analysis)

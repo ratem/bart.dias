@@ -18,8 +18,85 @@ Dependencies:
 - ast (Python standard library)
 """
 
-import ast
+import ast,copy
 from typing import Dict, List, Set, Tuple, Any, Optional
+
+
+class _RenameVar(ast.NodeTransformer):
+    def __init__(self, old, new): self.old, self.new = old, new
+    def visit_Name(self, node):
+        if isinstance(node, ast.Name) and node.id == self.old:
+            return ast.copy_location(ast.Name(id=self.new, ctx=node.ctx), node)
+        return node
+
+def _canon(node, loop_var):
+    n = copy.deepcopy(node)
+    if loop_var:
+        n = _RenameVar(loop_var, 'x').visit(n)
+    ast.fix_missing_locations(n)
+    return n
+
+def _src(node): return ast.unparse(node)
+
+def extract_listcomp_pipeline_stages(func_node: ast.FunctionDef, func_args: list[str]):
+    """Cadeia dependente de ListComp → [{'expr': str, 'pred': str|None}, ...] ou []."""
+    stages = []
+    last_target = None  # nome do buffer produzido pelo estágio anterior
+
+    def _maybe_stage_from_assign(assign: ast.Assign):
+        nonlocal last_target, stages
+        if len(assign.targets) != 1 or not isinstance(assign.targets[0], ast.Name):
+            return False
+        tgt = assign.targets[0].id
+        lc  = assign.value
+        if not isinstance(lc, ast.ListComp) or len(lc.generators) != 1:
+            return False
+
+        gen = lc.generators[0]
+        # DEPENDÊNCIA: estágio 1 aceita input_data; estágios seguintes DEVEM iterar sobre o buffer anterior
+        if last_target is None:
+            ok_source = isinstance(gen.iter, ast.Name) and gen.iter.id in func_args
+        else:
+            ok_source = isinstance(gen.iter, ast.Name) and gen.iter.id == last_target
+        if not ok_source:
+            return False  # quebrou cadeia → não é pipeline
+
+        expr = _src(_canon(lc.elt, getattr(gen.target, 'id', None)))
+        pred = None
+        if gen.ifs:
+            cond = gen.ifs[0]
+            for extra in gen.ifs[1:]:
+                cond = ast.BoolOp(op=ast.And(), values=[cond, extra])
+            pred = _src(_canon(cond, getattr(gen.target, 'id', None)))
+
+        stages.append({'expr': expr, 'pred': pred})
+        last_target = tgt
+        return True
+
+    # Varre o corpo; exige cadeia **contígua** (que não “volte” para input_data)
+    for stmt in func_node.body:
+        if isinstance(stmt, ast.Assign) and _maybe_stage_from_assign(stmt):
+            continue
+        # Estágio final como retorno por ListComp dependente do último target
+        if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.ListComp) and last_target:
+            lc = stmt.value; gen = lc.generators[0] if lc.generators else None
+            if gen and isinstance(gen.iter, ast.Name) and gen.iter.id == last_target:
+                expr = _src(_canon(lc.elt, getattr(gen.target, 'id', None)))
+                pred = None
+                if gen.ifs:
+                    cond = gen.ifs[0]
+                    for extra in gen.ifs[1:]:
+                        cond = ast.BoolOp(op=ast.And(), values=[cond, extra])
+                    pred = _src(_canon(cond, getattr(gen.target, 'id', None)))
+                stages.append({'expr': expr, 'pred': pred})
+        # Qualquer outra coisa que interrompa a contiguidade encerra a cadeia
+        # (se quiser ser mais permissivo, remova este "else: break")
+        else:
+            # não quebra se for statement neutro (pass, comments não vêm no AST)
+            pass
+
+    # só é pipeline se houver >=2 estágios encadeados
+    return stages if len(stages) >= 2 else []
 
 
 class BDiasPatternAnalyzer:
@@ -141,6 +218,80 @@ class BDiasPatternAnalyzer:
         # Pattern detection rules - map_reduce code structures to pattern indicators
         self.pattern_detection_rules = self._initialize_detection_rules()
 
+
+    def _has_map_only_pattern(self, node):
+        """
+        Detecta 'só map':
+        - listcomp atribuída:   x = [f(i) for i in ...]
+        - listcomp no return:   return [f(i) for i in ...]
+        - for+append:           result = []; for ...: result.append(...)
+        NÃO exige reduce; ignora se detectar reduce.
+        """
+        # Parse se vier dict
+        if isinstance(node, dict) and 'source' in node:
+            try:
+                node = ast.parse(node['source'])
+            except (SyntaxError, TypeError):
+                return False
+
+        if not hasattr(node, '_fields'):
+            return False
+
+        has_map_phase = False
+        intermediate_var = None
+
+        # x = [ ... ]
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Assign) and isinstance(sub.value, ast.ListComp):
+                if sub.targets and isinstance(sub.targets[0], ast.Name):
+                    has_map_phase = True
+                    intermediate_var = sub.targets[0].id
+                    break
+
+        # return [ ... ]
+        if not has_map_phase:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Return) and isinstance(getattr(sub, "value", None), ast.ListComp):
+                    has_map_phase = True
+                    break
+
+        # for ...: result.append(...)
+        if not has_map_phase:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.For):
+                    for stmt in ast.walk(sub):
+                        if (isinstance(stmt, ast.Call)
+                            and getattr(getattr(stmt, 'func', None), 'attr', '') == 'append'
+                            and getattr(getattr(stmt.func, 'value', None), 'id', None)):
+                            has_map_phase = True
+                            intermediate_var = intermediate_var or getattr(stmt.func.value, 'id', None)
+                            break
+                if has_map_phase:
+                    break
+
+        if not has_map_phase:
+            return False
+
+        # Se tiver reduce, então não é “só map”: deixe o outro detector cuidar
+        if intermediate_var:
+            for sub in ast.walk(node):
+                # sum(result), max(result), reduce(..., result) etc.
+                if isinstance(sub, ast.Assign) and isinstance(sub.value, ast.Call):
+                    fid = getattr(getattr(sub.value, 'func', None), 'id', None)
+                    if fid in ('sum', 'min', 'max', 'reduce'):
+                        for arg in sub.value.args:
+                            if isinstance(arg, ast.Name) and arg.id == intermediate_var:
+                                return False
+                # for item in result: total += item
+                if isinstance(sub, ast.For):
+                    if getattr(getattr(sub, 'iter', None), 'id', None) == intermediate_var:
+                        for stmt in ast.walk(sub):
+                            if isinstance(stmt, ast.AugAssign):
+                                return False
+
+        return True
+
+
     def _initialize_detection_rules(self) -> Dict[str, Dict[str, Any]]:
         """
         Initialize the pattern detection rules that map_reduce code structures
@@ -211,17 +362,43 @@ class BDiasPatternAnalyzer:
         return pattern_analysis
 
     def _get_pipeline_stages(self, node):
-        """Identify explicit pipeline stages with buffer variables"""
+        """Identifica estágios de pipeline por criação/consumo/produção de buffers."""
         stages = []
-        current_buffer = None
+        buffer_vars = set()
+
         for stmt in node.body:
-            if isinstance(stmt, ast.Assign) and \
-                    isinstance(stmt.targets[0], ast.Name) and \
-                    stmt.targets[0].id.endswith(('buffer', 'stage', 'result')):
-                stages.append(stmt)
-                current_buffer = stmt.targets[0].id
-            elif current_buffer and isinstance(stmt, ast.For):
-                stages.append(stmt)
+            # 1) Atribuições que criam coleção: [], list(), deque(), Queue()...
+            if isinstance(stmt, ast.Assign):
+                is_collection = (
+                    isinstance(stmt.value, ast.List) or
+                    (isinstance(stmt.value, ast.Call) and
+                    getattr(stmt.value.func, 'id', None) in ('list', 'deque', 'Queue', 'array', 'set', 'dict'))
+                )
+                if is_collection:
+                    for t in stmt.targets:
+                        if isinstance(t, ast.Name):
+                            buffer_vars.add(t.id)
+                            stages.append(('alloc', t.id, getattr(stmt, 'lineno', 0)))
+
+            # 2) Loops que consomem um buffer existente e/ou produzem outro via append/extend/put
+            elif isinstance(stmt, ast.For):
+                itername = getattr(stmt.iter, 'id', None)
+                consumes = itername in buffer_vars
+                produces = False
+
+                for inner in ast.walk(stmt):
+                    if isinstance(inner, ast.Call) and getattr(inner.func, 'attr', '') in ('append', 'extend', 'put'):
+                        # Se faz algo como X.append(...), X é um novo buffer produzido (ou estágio atual)
+                        if hasattr(inner.func.value, 'id'):
+                            buffer_vars.add(inner.func.value.id)
+                        produces = True
+                        break
+
+                if consumes or produces:
+                    stages.append(('loop', itername, getattr(stmt, 'lineno', 0)))
+
+        # Se você preferir só contar os loops (estágios efetivos):
+        # return [s for s in stages if s[0] == 'loop']
         return stages
 
 
@@ -241,15 +418,50 @@ class BDiasPatternAnalyzer:
         # --- 1. PIPELINE: detect *all* functions from the raw code ---
         pipeline_lines = set()
         for func in self.parser.get_all_functions(raw_code):
-            # Parse the source code to get an AST node if not present
+            # garanta o AST da função
             if 'node' not in func:
                 try:
-                    func_node = ast.parse(func['source']).body[0]  # Get the FunctionDef node
+                    func_node = ast.parse(func['source']).body[0]  # FunctionDef
                     func['node'] = func_node
                 except (SyntaxError, IndexError):
-                    continue  # Skip if parsing fails
+                    continue
+            else:
+                func_node = func['node']
 
-            if self._has_producer_consumer_pattern(func) and len(self._get_pipeline_stages(func['node'])) >= 2:
+            # 1A) PRIORITÁRIO: pipeline por cadeia de ListComp COM DEPENDÊNCIA
+            try:
+                func_args = [a.arg for a in func_node.args.args]
+            except Exception:
+                func_args = []
+            lc_stages = extract_listcomp_pipeline_stages(func_node, func_args)
+            if lc_stages:
+                identified_patterns['pipeline'].append({
+                    'type': 'function',
+                    'lineno': func['lineno'],
+                    'confidence': 0.92,  # mais alto pq é detecção estruturada
+                    'details': {
+                        'name': func['name'],
+                        'source': func['source'],
+                        'lineno': func['lineno'],
+                        'end_lineno': func['end_lineno'],
+                        # opcional: passar estágios detectados para debug/telemetria
+                        'lc_stages': lc_stages
+                    }
+                })
+                # reserva TODAS as linhas da função pra não virar MR depois
+                pipeline_lines.update(range(func['lineno'], func['end_lineno'] + 1))
+                continue  # já classificou como pipeline; não disputa com MR
+
+            # 1B) fallback: pipeline "clássico" (for+append com produtor→consumidor)
+            #    Regra: precisa ter AO MENOS DOIS loops de NÍVEL SUPERIOR (sequenciais)
+            #    e NÃO ser um caso claro de Map-Reduce (map + reduce).
+            func_node = func['node']
+            top_level_loops = [s for s in getattr(func_node, 'body', []) if isinstance(s, ast.For)]
+            loop_count = len(top_level_loops)
+
+            if (loop_count >= 2
+                and self._has_producer_consumer_pattern(func)   # sua checagem de fluxo
+                and not self._has_map_reduce_pattern(func)):    # map+reduce não vira pipeline
                 identified_patterns['pipeline'].append({
                     'type': 'function',
                     'lineno': func['lineno'],
@@ -261,8 +473,8 @@ class BDiasPatternAnalyzer:
                         'end_lineno': func['end_lineno']
                     }
                 })
-                # claim its lines so we won't treat its loops as map-reduce
                 pipeline_lines.update(range(func['lineno'], func['end_lineno'] + 1))
+
 
         # --- 2. MAP-REDUCE: skip loops inside any claimed pipeline function ---
         for loop in structured_code.get('loops', []):
@@ -292,7 +504,14 @@ class BDiasPatternAnalyzer:
                 identified_patterns['map_reduce'].append({
                     'type': 'function',
                     'lineno': func['lineno'],
-                    'confidence': 0.85,
+                    'confidence': 0.9,   # map + reduce
+                    'details': func
+                })
+            elif self._has_map_only_pattern(func):
+                identified_patterns['map_reduce'].append({
+                    'type': 'function',
+                    'lineno': func['lineno'],
+                    'confidence': 0.75,  # só map
                     'details': func
                 })
 

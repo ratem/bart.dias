@@ -15,3 +15,6 @@ def process_data_stream(input_data):
         results.append(f"Length: {length}")
 
     return results
+
+
+# print(process_data_stream([" Hello ", "World", "  BART ", "  DIAS  "]))

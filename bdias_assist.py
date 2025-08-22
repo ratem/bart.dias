@@ -421,6 +421,9 @@ class BDiasAssist:
         print("Welcome to Bart.dIAs! I will analyze your Python code to find parallelization opportunities.")
         while True:
             code = input("Enter your Python code or a file path, or type 'exit' to quit: ")
+            if len(code) == 0:
+                code = "./tests/examples/pipeline/tdp_pipeline.py"  # Default example code
+                print("Assuming "+code)
             if not self.process_code(code):
                 break
         print("Exiting Bart.dIAs. Goodbye!")

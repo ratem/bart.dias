@@ -16,3 +16,7 @@ def three_stage_pipeline(data):
     
     return results
 
+if __name__ == "__main__":
+    input_data_sample = [1, 2, 3, 4, 5]
+    result = three_stage_pipeline(input_data_sample)
+    print(result)

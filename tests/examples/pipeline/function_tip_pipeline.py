@@ -19,3 +19,10 @@ def analyze_network_traffic(packets):
         reports.append(f"{stat['type']}: {stat['size']} bytes")
 
     return reports
+
+# print(analyze_network_traffic([
+#     {'valid': True, 'size': 1500, 'protocol': 'TCP'},
+#     {'valid': False, 'size': 1200, 'protocol': 'UDP'},
+#     {'valid': True, 'size': 800, 'protocol': 'ICMP'},
+#     {'valid': True, 'size': 2000, 'protocol': 'TCP'}
+# ]))

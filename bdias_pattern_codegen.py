@@ -34,7 +34,7 @@ Dependencies:
 import ast
 import jinja2
 from typing import Dict, List, Any, Optional, Tuple
-
+import copy
 
 class BDiasPatternTransformer(ast.NodeTransformer):
     """Base class for pattern-specific AST transformers."""
@@ -360,6 +360,227 @@ class MapReducePatternTransformer(BDiasPatternTransformer):
             return template.render(**self.context)
 
 
+# ==== Helpers para extrair expressões canônicas de pipeline ====
+
+def _canonicalize_expr(node: ast.AST, loop_var: str) -> ast.AST:
+    """Renomeia a variável do loop para 'x' para padronizar a expressão do estágio."""
+    node = copy.deepcopy(node)
+    if loop_var:
+        node = _RenameVar(loop_var, 'x').visit(node)
+    ast.fix_missing_locations(node)
+    return node
+
+def _extract_stage_exprs_from_function(func_node: ast.FunctionDef) -> list[str]:
+    """
+    Retorna uma lista de expressões str, uma por estágio do pipeline, *em função de x*.
+    - Estágio 1..k dentro do primeiro for: inlining de temporários até o append.
+    - Estágio final: loops seguintes que fazem .append(...) no 'results' (ou similar).
+    Cobre o caso nested_pipeline.
+    """
+    stage_exprs: list[str] = []
+
+    # 1) Primeiro 'for' da função: calcula o estágio que preenche o primeiro buffer
+    first_for: ast.For | None = None
+    for stmt in func_node.body:
+        if isinstance(stmt, ast.For):
+            first_for = stmt
+            break
+
+    if first_for is not None:
+        loop_var = getattr(first_for.target, 'id', None)
+        env: dict[str, ast.AST] = {}  # variáveis temporárias dentro do for
+
+        for s in first_for.body:
+            # temp = <expr>
+            if isinstance(s, ast.Assign) and len(s.targets) == 1 and isinstance(s.targets[0], ast.Name):
+                env[s.targets[0].id] = s.value
+
+            # temp += <expr>
+            elif isinstance(s, ast.AugAssign) and isinstance(s.target, ast.Name):
+                t = s.target.id
+                base = env.get(t, ast.Name(id=t, ctx=ast.Load()))
+                env[t] = ast.BinOp(left=base, op=s.op, right=s.value)
+
+            # buffer.append(<expr>)
+            elif isinstance(s, ast.Expr) and isinstance(s.value, ast.Call):
+                call = s.value
+                if getattr(call.func, 'attr', None) == 'append' and call.args:
+                    arg = call.args[0]
+                    # inlining: se for um Name temporário, expande usando env
+                    if isinstance(arg, ast.Name) and arg.id in env:
+                        arg = env[arg.id]
+                    arg = _canonicalize_expr(arg, loop_var)
+                    stage_exprs.append(_src(arg))
+                    # Só um 'append' por estágio nesse for; se houver mais, pode-se coletar todos.
+
+    # 2) Demais 'for' da função: estágios subsequentes que fazem .append(...)
+    # (ex.: for val in intermediate: results.append(val**2))
+    for stmt in func_node.body:
+        if isinstance(stmt, ast.For) and stmt is not first_for:
+            loop_var = getattr(stmt.target, 'id', None)
+            for s in stmt.body:
+                if isinstance(s, ast.Expr) and isinstance(s.value, ast.Call):
+                    call = s.value
+                    if getattr(call.func, 'attr', None) == 'append' and call.args:
+                        arg = call.args[0]
+                        arg = _canonicalize_expr(arg, loop_var)
+                        stage_exprs.append(_src(arg))
+
+    return stage_exprs
+
+def _extract_stage_descs_from_function(func_node: ast.FunctionDef):
+    """Retorna lista de estágios, cada um: {'expr': <str>, 'pred': <str|None>}."""
+    stages = []
+
+    # Primeiro for (estágio 1…k internos)
+    first_for = next((st for st in func_node.body if isinstance(st, ast.For)), None)
+    if first_for is not None:
+        loop_var = getattr(first_for.target, 'id', None)
+        pairs = _collect_appends_with_pred(first_for.body, loop_var)
+        for expr_node, pred_node in pairs:
+            stages.append({
+                'expr': _src(expr_node),
+                'pred': _src(pred_node) if pred_node is not None else None,
+            })
+
+    # Demais for (estágios subsequentes)
+    for st in func_node.body:
+        if isinstance(st, ast.For) and st is not first_for:
+            loop_var = getattr(st.target, 'id', None)
+            pairs = _collect_appends_with_pred(st.body, loop_var)
+            for expr_node, pred_node in pairs:
+                stages.append({
+                    'expr': _src(expr_node),
+                    'pred': _src(pred_node) if pred_node is not None else None,
+                })
+
+    return stages
+
+
+class _RenameVar(ast.NodeTransformer):
+    def __init__(self, old, new): self.old, self.new = old, new
+    def visit_Name(self, node):
+        if isinstance(node, ast.Name) and node.id == self.old:
+            return ast.copy_location(ast.Name(id=self.new, ctx=node.ctx), node)
+        return node
+
+def _canon(node, loop_var):
+    n = copy.deepcopy(node)
+    if loop_var:
+        n = _RenameVar(loop_var, 'x').visit(n)
+    ast.fix_missing_locations(n)
+    return n
+
+def _src(node): return ast.unparse(node)
+
+def _and(a, b):
+    import ast as _ast
+    if a and b:
+        return _ast.BoolOp(op=_ast.And(), values=[a, b])
+    return a or b
+
+def _not(a):
+    import ast as _ast
+    return _ast.UnaryOp(op=_ast.Not(), operand=a)
+
+def _collect_appends_with_pred(stmts, loop_var, env=None, pred_ctx=None):
+    """for+append → [(expr_node, pred_node|None), ...]"""
+    if env is None: env = {}
+    out = []
+    for s in stmts:
+        if isinstance(s, ast.Assign) and len(s.targets)==1 and isinstance(s.targets[0], ast.Name):
+            env[s.targets[0].id] = s.value
+            continue
+        if isinstance(s, ast.AugAssign) and isinstance(s.target, ast.Name):
+            t = s.target.id
+            base = env.get(t, ast.Name(id=t, ctx=ast.Load()))
+            env[t] = ast.BinOp(left=base, op=s.op, right=s.value)
+            continue
+        if isinstance(s, ast.If):
+            out += _collect_appends_with_pred(s.body, loop_var, env.copy(), _and(pred_ctx, s.test))
+            if s.orelse:
+                out += _collect_appends_with_pred(s.orelse, loop_var, env.copy(), _and(pred_ctx, _not(s.test)))
+            continue
+        if isinstance(s, ast.Expr) and isinstance(getattr(s, 'value', None), ast.Call):
+            call = s.value
+            if getattr(call.func, 'attr', None) == 'append' and call.args:
+                arg = call.args[0]
+                if isinstance(arg, ast.Name) and arg.id in env:
+                    arg = env[arg.id]
+                arg = _canon(arg, loop_var)
+                pred = _canon(pred_ctx, loop_var) if pred_ctx is not None else None
+                out.append((arg, pred))
+            continue
+        # recursão leve para blocos compostos
+        body = getattr(s, 'body', None)
+        if isinstance(body, list):
+            out += _collect_appends_with_pred(body, loop_var, env.copy(), pred_ctx)
+    return out
+
+def _extract_pipeline_stages_from_for_append(func_node: ast.FunctionDef):
+    """Funções com loops e appends → [{'expr': str, 'pred': str|None}, ...]"""
+    stages = []
+    # primeiro for (pode ter subestágios dentro)
+    first_for = next((st for st in func_node.body if isinstance(st, ast.For)), None)
+    if first_for is not None:
+        loop_var = getattr(first_for.target, 'id', None)
+        for expr_node, pred_node in _collect_appends_with_pred(first_for.body, loop_var):
+            stages.append({'expr': _src(expr_node), 'pred': _src(pred_node) if pred_node else None})
+    # for(s) seguintes (estágios subsequentes)
+    for st in func_node.body:
+        if isinstance(st, ast.For) and st is not first_for:
+            loop_var = getattr(st.target, 'id', None)
+            for expr_node, pred_node in _collect_appends_with_pred(st.body, loop_var):
+                stages.append({'expr': _src(expr_node), 'pred': _src(pred_node) if pred_node else None})
+    return stages
+
+def _extract_pipeline_stages_from_listcomps(func_node: ast.FunctionDef, func_args: list[str]):
+    """Cadeia dependente de ListComp → [{'expr': str, 'pred': str|None}, ...]"""
+    stages = []
+    last_target = None
+    for stmt in func_node.body:
+        # Assign target = ListComp
+        if isinstance(stmt, ast.Assign) and len(stmt.targets)==1 and isinstance(stmt.targets[0], ast.Name):
+            tgt = stmt.targets[0].id
+            lc  = stmt.value
+            if not (isinstance(lc, ast.ListComp) and len(lc.generators)==1):
+                continue
+            gen = lc.generators[0]
+            # DEP: 1º estágio consome arg; próximos consomem o target anterior
+            if last_target is None:
+                ok = isinstance(gen.iter, ast.Name) and gen.iter.id in func_args
+            else:
+                ok = isinstance(gen.iter, ast.Name) and gen.iter.id == last_target
+            if not ok: 
+                stages.clear(); last_target=None; continue
+            expr = _src(_canon(lc.elt, getattr(gen.target, 'id', None)))
+            pred = None
+            if gen.ifs:
+                cond = gen.ifs[0]
+                for e in gen.ifs[1:]:
+                    cond = ast.BoolOp(op=ast.And(), values=[cond, e])
+                pred = _src(_canon(cond, getattr(gen.target, 'id', None)))
+            stages.append({'expr': expr, 'pred': pred})
+            last_target = tgt
+            continue
+        # Return ListComp dependente do último target
+        if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.ListComp) and last_target:
+            lc = stmt.value
+            if lc.generators:
+                gen = lc.generators[0]
+                if isinstance(gen.iter, ast.Name) and gen.iter.id == last_target:
+                    expr = _src(_canon(lc.elt, getattr(gen.target, 'id', None)))
+                    pred = None
+                    if gen.ifs:
+                        cond = gen.ifs[0]
+                        for e in gen.ifs[1:]:
+                            cond = ast.BoolOp(op=ast.And(), values=[cond, e])
+                        pred = _src(_canon(cond, getattr(gen.target, 'id', None)))
+                    stages.append({'expr': expr, 'pred': pred})
+            break
+    return stages
+# ==== Fim dos helpers ====
+
 class PipelinePatternTransformer(BDiasPatternTransformer):
     """
     Transformer for the Pipeline pattern.  It picks out the top-level
@@ -370,42 +591,36 @@ class PipelinePatternTransformer(BDiasPatternTransformer):
     """
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
-        # Match by function name (bottleneck['name']), not by lineno/details.
+        # Garantir que é a função-alvo (pelo nome)
         if (self.bottleneck.get('type') != 'function'
             or node.name != self.bottleneck.get('name')):
             return node
 
-        # Extract all for-loops in the function body
-        loops = [stmt for stmt in node.body if isinstance(stmt, ast.For)]
-        stage_exprs = []
-        for loop in loops:
-            # find the .append(...) call in this loop
-            for stmt in loop.body:
-                if (isinstance(stmt, ast.Expr)
-                    and isinstance(stmt.value, ast.Call)
-                    and getattr(stmt.value.func, 'attr', '') == 'append'):
-                    # unparse the single argument to append(...)
-                    expr = ast.unparse(stmt.value.args[0]).strip()
-                    stage_exprs.append(expr)
-                    break
-
-        # function arguments and input data
         func_args = [arg.arg for arg in node.args.args]
         input_data = func_args[0] if func_args else 'data'
 
-        # Populate context for templates
+        # 1) Tenta cadeia de ListComps com dependência; 2) fallback para for+append
+        stages = _extract_pipeline_stages_from_listcomps(node, func_args)
+        if not stages:
+            stages = _extract_pipeline_stages_from_for_append(node)
+
+        # Proteção: não gere pipeline vazia
+        if not stages:
+            raise ValueError(f"Pipeline reconhecida em '{node.name}', mas nenhum estágio extraído.")
+
+        # Contexto para o template
         self.context.update({
             'func_name':   node.name,
             'func_args':   func_args,
             'input_data':  input_data,
-            'stage_count': len(stage_exprs),
-            'stage_exprs': stage_exprs
+            'stage_exprs': stages,          # lista de dicts {'expr','pred'}
+            'stage_count': len(stages),
+            'partitioning_strategy': self.partitioning_strategy,
+            'is_class_method': func_args and func_args[0] == 'self',
         })
 
-        # Common imports for pipeline code
+        # Imports (usa mp.Queue, não precisa 'queue.Queue')
         self.add_import('multiprocessing', None, None)
-        self.add_import('queue', 'Queue', None)
-
         return node
 
 def generate_hardware_recommendations(context: Dict[str, Any]) -> str:
@@ -466,6 +681,9 @@ def generate_parallel_code(
 
     # 2. Run the AST transformer to build transformer.context
     transformer.visit(tree)
+    # sanity: não gerar pipeline vazia
+    if pattern == 'pipeline' and transformer.context.get('stage_count', 0) == 0:
+        raise ValueError("Pipeline reconhecida, mas nenhum estágio extraído para codegen.")
     transformer.finalize(tree)
 
     # 3. Select the template based on pattern, function status, and strategy

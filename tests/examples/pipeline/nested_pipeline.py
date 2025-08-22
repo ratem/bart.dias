@@ -16,3 +16,6 @@ def nested_data_processing(data):
         results.append(val ** 2)
 
     return results
+
+
+# print(nested_data_processing([1, 2, 3, 4, 5]))
