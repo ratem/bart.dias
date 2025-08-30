@@ -15,7 +15,7 @@ class TestPatternAnalyzer(unittest.TestCase):
     def test_pattern_matrix_initialization(self):
         """Test that the pattern matrix is correctly initialized."""
         expected_patterns = [
-            "map_reduce", "pipeline", "stencil", "master_worker",
+            "map_reduce", "pipeline", "stencil", "pool_worker",
             "fork_join", "divide_conquer", "scatter_gather"
         ]
         for pattern in expected_patterns:

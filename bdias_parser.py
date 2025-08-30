@@ -335,18 +335,34 @@ class BDiasParser:
         """Checks if a list comprehension is potentially parallelizable."""
         try:
             tree = ast.parse(listcomp_code)
-            dependency_graph = self.build_dependency_graph(tree)
-            data_flow_deps = self.analyze_data_flow(tree)
 
+            # Helper: extrai todos os nomes (ids) de um alvo de compreensão
+            def _target_ids(t):
+                ids = set()
+                if isinstance(t, ast.Name):
+                    ids.add(t.id)
+                elif isinstance(t, (ast.Tuple, ast.List)):
+                    for elt in t.elts:
+                        if isinstance(elt, ast.Name):
+                            ids.add(elt.id)
+                return ids
+
+            # Verifica se cada Name em contexto de Store pertence a algum target de comprehension
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                    if not any(isinstance(parent, ast.comprehension) and
-                               isinstance(node, ast.Name) and
-                               node.id == parent.target.id for parent in ast.walk(tree)):
+                    bound = False
+                    for parent in ast.walk(tree):
+                        if isinstance(parent, ast.comprehension):
+                            if node.id in _target_ids(parent.target):
+                                bound = True
+                                break
+                    if not bound:
                         return False
+
             return True
         except SyntaxError:
             return False
+
 
     def parse(self, code):
         """

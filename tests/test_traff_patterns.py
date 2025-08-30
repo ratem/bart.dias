@@ -202,16 +202,19 @@ def map_nested():
         identified_patterns = self.analyzer._identify_patterns(structured_code,code)
         self.assertGreater(len(identified_patterns["divide_conquer"]), 0)
 
-    def test_master_worker_pattern_direct(self):
-        """Test master-worker pattern detection directly without using the parser."""
-        code = """def master_worker(tasks):
-        results = []
+    def test_pool_worker_pattern_direct(self):
+        """Test pool-workers pattern detection directly without using the parser."""
+        code = """def process_tasks(tasks):
+    # Um resultado por item (sem dependências entre itens)
+    results = []
+    for t in tasks:
+        results.append((t * 2 + 10) * 3)
+    return results
 
-        # Master distributes tasks
-        for task in tasks:
-            results.append(worker_process(task))
 
-        return results
+if __name__ == "__main__":
+    data = [1, 2, 3, 4, 5]
+    print(process_tasks(data))  # esperado: [36, 42, 48, 54, 60]
     """
         # Parse the code directly with ast
         tree = ast.parse(code)
@@ -230,11 +233,11 @@ def map_nested():
         # Test if the _has_task_distribution method works correctly
         function_node = ast.parse(structured_code["functions"][0]["source"])
         has_task_distribution = self.analyzer._has_task_distribution(function_node)
-        self.assertTrue(has_task_distribution, "Master-worker pattern should be detected")
+        self.assertTrue(has_task_distribution, "pool-workers pattern should be detected")
 
         # Test pattern identification with the mock structured_code
         identified_patterns = self.analyzer._identify_patterns(structured_code,code)
-        self.assertGreater(len(identified_patterns["master_worker"]), 0)
+        self.assertGreater(len(identified_patterns["pool"]), 0)
 
     def test_scatter_gather_pattern_direct(self):
         """Test scatter-gather pattern detection directly without using the parser."""

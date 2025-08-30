@@ -1,0 +1,56 @@
+{# templates/master_slave/function_default_multiprocessing.j2 #}
+import multiprocessing as mp
+
+# --- Worker em nível de módulo (picklable quando importável) ---
+def {{func_name}}__ms_worker(task_q, result_q):
+    while True:
+        item = task_q.get()
+        if item is None:  # sentinela
+            break
+        idx, x = item
+        {% if pred_expr %}
+        if not ({{pred_expr}}):
+            result_q.put((idx, None))
+            continue
+        {% endif %}
+        y = ({{task_expr}})
+        result_q.put((idx, y))
+
+def {{func_name}}_parallel({{func_args|join(", ")}}{% if func_args|length == 0 %}data{% endif %}, nslaves=None):
+    """
+    master-slave gerado automaticamente para {{func_name}} (versão processos).
+    Coordena N escravos via mp.Queue; preserva ordem via índice.
+    """
+    data_list = list({{input_data}})
+    if not data_list:
+        return []
+
+    task_q = mp.Queue()
+    result_q = mp.Queue()
+
+    if nslaves is None:
+        nslaves = max(1, mp.cpu_count())
+
+    procs = [mp.Process(target={{func_name}}__ms_worker, args=(task_q, result_q))
+             for _ in range(nslaves)]
+    for p in procs:
+        p.start()
+
+    for i, x in enumerate(data_list):
+        task_q.put((i, x))
+    for _ in range(nslaves):
+        task_q.put(None)  # encerra
+
+    acc = [None] * len(data_list)
+    for _ in range(len(data_list)):
+        idx, value = result_q.get()
+        acc[idx] = value
+
+    for p in procs:
+        p.join()
+
+    {% if pred_expr %}
+    acc = [v for v in acc if v is not None]
+    {% endif %}
+
+    return acc

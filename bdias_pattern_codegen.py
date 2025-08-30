@@ -676,8 +676,12 @@ def generate_parallel_code(
         transformer = PipelinePatternTransformer(bottleneck, partitioning_strategy)
     elif pattern == 'map_reduce':
         transformer = MapReducePatternTransformer(bottleneck, partitioning_strategy)
-    elif pattern in ('master_worker', 'pool_workers', 'worker_pool'):
+    elif pattern in ('pool_worker', 'pool_workers', 'worker_pool', 'pool'):
+        pattern = "pool_workers"
         transformer = MasterWorkerPatternTransformer(bottleneck, partitioning_strategy)
+    elif pattern in ('master_slave', 'master-worker', 'master_worker'):
+        pattern = "master_slave"
+        transformer = MasterSlavePatternTransformer(bottleneck, partitioning_strategy)
     else:
         raise NotImplementedError(f"Pattern '{pattern}' not supported for code generation.")
 
@@ -693,19 +697,26 @@ def generate_parallel_code(
     is_function = 'func_name' in transformer.context
     strat = partitioning_strategy[0].lower()
 
-    if is_function:
-        template_name = f"{pattern}/function_{strat}_multiprocessing.j2"
+    # Seleção especial para master_slave "worker-like"
+    if pattern == 'master_slave' and transformer.context.get('wrap_existing_worker'):
+        template_name = f"{pattern}/function_wrap_worker_threads.j2"
     else:
-        template_name = f"{pattern}/{strat}_multiprocessing.j2"
+        if is_function:
+            template_name = f"{pattern}/function_{strat}_multiprocessing.j2"
+        else:
+            template_name = f"{pattern}/{strat}_multiprocessing.j2"
 
     try:
         tpl = transformer.env.get_template(template_name)
     except jinja2.exceptions.TemplateNotFound:
-        # Fallback to appropriate default template
-        if is_function:
-            tpl = transformer.env.get_template(f"{pattern}/function_default_multiprocessing.j2")
+        if pattern == 'master_slave' and transformer.context.get('wrap_existing_worker'):
+            tpl = transformer.env.get_template(f"{pattern}/function_wrap_worker_threads.j2")
         else:
-            tpl = transformer.env.get_template(f"{pattern}/default_multiprocessing.j2")
+            if is_function:
+                tpl = transformer.env.get_template(f"{pattern}/function_default_multiprocessing.j2")
+            else:
+                tpl = transformer.env.get_template(f"{pattern}/default_multiprocessing.j2")
+
 
     # 4. Render the template with the populated context
     transformed_code = tpl.render(**transformer.context)
@@ -725,7 +736,7 @@ def generate_parallel_code(
 class MasterWorkerPatternTransformer(BDiasPatternTransformer):
     """
     Gera uma versão paralela (pool of workers) para funções com padrão
-    master-worker: um loop que consome itens de uma coleção e produz
+    pool-workers: um loop que consome itens de uma coleção e produz
     um resultado por item (append em um buffer/resultado).
     Extrai a expressão do "append(...)" e, se existir, um predicado "if".
     """
@@ -742,14 +753,14 @@ class MasterWorkerPatternTransformer(BDiasPatternTransformer):
         # 1) pegue o primeiro for top-level
         first_for = next((st for st in node.body if isinstance(st, ast.For)), None)
         if first_for is None:
-            raise ValueError(f"Master-Worker: não encontrei loop top-level em '{node.name}'.")
+            raise ValueError(f"pool-workers: não encontrei loop top-level em '{node.name}'.")
 
         loop_var = getattr(first_for.target, 'id', None)
 
         # 2) colete appends (expr, pred) dentro do for (usa seus helpers)
         pairs = _collect_appends_with_pred(first_for.body, loop_var)
         if not pairs:
-            raise ValueError("Master-Worker: loop não contém append(...) para extrair tarefa.")
+            raise ValueError("pool-workers: loop não contém append(...) para extrair tarefa.")
 
         # Heurística simples: use o primeiro append do loop
         expr_node, pred_node = pairs[0]
@@ -758,7 +769,7 @@ class MasterWorkerPatternTransformer(BDiasPatternTransformer):
 
         # Contexto para template
         self.context.update({
-            'pattern': 'master_worker',
+            'pattern': 'pool_worker',
             'func_name': node.name,
             'func_args': func_args,
             'input_data': input_data,
@@ -772,3 +783,105 @@ class MasterWorkerPatternTransformer(BDiasPatternTransformer):
         # Imports (multiprocessing)
         self.add_import('multiprocessing', None, None)
         return node
+
+
+# ======== Master–Slave
+
+def _is_worker_like_function(node: ast.FunctionDef) -> bool:
+    """
+    Heurística: função que roda em laço consumindo de 'q.get()' ou 'conn.recv()'
+    e produz com 'out.put()' ou 'conn.send()'. Não confundir com Pool/Executor.
+    """
+    has_loop_getrecv = False
+    has_put_or_send = False
+
+    # loop com get()/recv()
+    for n in ast.walk(node):
+        if isinstance(n, (ast.While, ast.For)):
+            for call in ast.walk(n):
+                if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute):
+                    if call.func.attr in ("get", "recv"):
+                        has_loop_getrecv = True
+                        break
+
+    # put()/send() em algum ponto
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+            if n.func.attr in ("put", "send"):
+                has_put_or_send = True
+                break
+
+    return has_loop_getrecv and has_put_or_send
+
+class MasterSlavePatternTransformer(BDiasPatternTransformer):
+    """
+    Gera versão master-slave (coordenador + N escravos) para funções com
+    um loop que produz 1 saída por item (append em buffer/resultado).
+    """
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        # só a função-alvo
+        if (self.bottleneck.get('type') != 'function'
+            or node.name != self.bottleneck.get('name')):
+            return node
+
+        func_args = [a.arg for a in node.args.args]
+        input_data = func_args[0] if func_args else 'data'
+
+        # helper local
+        def _worker_calls_task_done(fn: ast.FunctionDef) -> bool:
+            for n in ast.walk(fn):
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "task_done":
+                    return True
+            return False
+
+        # --- Caminho B: função já é "worker-like" → gerar WRAPPER com threads ---
+        if _is_worker_like_function(node):
+            # Contexto para template de WRAPPER (threads + queue)
+            self.context.update({
+                "pattern": "master_slave",
+                "wrap_existing_worker": True,
+                "worker_name": node.name,
+                # ⚠️ injete APENAS a definição do worker, não o módulo inteiro:
+                "worker_def_src": ast.unparse(node),
+                "worker_calls_task_done": _worker_calls_task_done(node),
+                "func_name": node.name,
+                "func_args": [a.arg for a in node.args.args],
+                "partitioning_strategy": self.partitioning_strategy,
+            })
+            return node
+
+        # --- Caminho A: função SEQUENCIAL (for+append) → gerar MS por processos ---
+        # 1) pegar primeiro for top-level
+        first_for = next((st for st in node.body if isinstance(st, ast.For)), None)
+        if first_for is None:
+            # Se não é worker-like e não há for, não dá para extrair o "map" → aborta limpo
+            raise ValueError(f"master-slave: função '{node.name}' não é worker-like nem possui loop for+append.")
+
+        loop_var = getattr(first_for.target, 'id', None)
+
+        # 2) coleta appends (expr, pred)
+        pairs = _collect_appends_with_pred(first_for.body, loop_var)
+        if not pairs:
+            raise ValueError("master-slave: loop não contém append(...) para extrair tarefa.")
+
+        expr_node, pred_node = pairs[0]
+        task_expr = _src(expr_node)
+        pred_expr = _src(pred_node) if pred_node is not None else None
+
+        self.context.update({
+            'pattern': 'master_slave',
+            'func_name': node.name,
+            'func_args': func_args,
+            'input_data': input_data,
+            'loop_var': loop_var or 'x',
+            'task_expr': task_expr,
+            'pred_expr': pred_expr,
+            'is_class_method': func_args and func_args[0] == 'self',
+            'partitioning_strategy': self.partitioning_strategy,
+        })
+        return node
+
+
+
+    

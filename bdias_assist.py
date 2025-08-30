@@ -422,7 +422,7 @@ class BDiasAssist:
         while True:
             code = input("Enter your Python code or a file path, or type 'exit' to quit: ")
             if len(code) == 0:
-                code = "./tests/examples/master_worker/predicate_master_worker.py"  # Default example code
+                code = "./tests/examples/maste-slave/thread_q_join.py"  # Default example code
                 print("Assuming "+code)
             if not self.process_code(code):
                 break

@@ -1819,7 +1819,7 @@ can be proven. Regardless of what strategy is chosen, the work pool
 pattern eventually needs to solve the (distributed) *termination
 detection problem*: when is the pool definitely empty?
 
-### Master-worker/Master-slave {#sec:masterworker}
+### pool-workers/Master-slave {#sec:masterworker}
 
 The *master-slave* or *master-worker* pattern is sometimes used to
 implement the work pool pattern. A dedicated master processor maintains

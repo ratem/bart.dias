@@ -1,0 +1,38 @@
+{# templates/pool_worker/function_default_multiprocessing.j2 #}
+import multiprocessing as mp
+import pickle
+from concurrent.futures import ThreadPoolExecutor
+
+# --- Worker em nível de módulo (picklable quando importável) ---
+def {{func_name}}__worker(x):
+    {% if pred_expr %}
+    if not ({{pred_expr}}):
+        return None
+    {% endif %}
+    return ({{task_expr}})
+
+def {{func_name}}_parallel({{func_args|join(", ")}}{% if func_args|length == 0 %}data{% endif %}, batch_size=None):
+    """
+    pool-workers (pool of workers) gerado automaticamente para {{func_name}}.
+    Estratégia: default → tenta mp.Pool.map; se não der pickle, cai para ThreadPoolExecutor.
+    """
+    data_iter = {{input_data}}
+    nprocs = max(1, mp.cpu_count())
+
+    try:
+        with mp.Pool(processes=nprocs) as pool:
+            if batch_size:
+                mapped = pool.map({{func_name}}__worker, data_iter, int(batch_size))
+            else:
+                mapped = pool.map({{func_name}}__worker, data_iter)
+    except (AttributeError, pickle.PicklingError):
+        # Código gerado via `exec` não é importável por nome: use threads.
+        with ThreadPoolExecutor(max_workers=nprocs) as ex:
+            mapped = list(ex.map({{func_name}}__worker, data_iter))
+
+    {% if pred_expr %}
+    # Filtra Nones se houver predicado e preserva ordem
+    if any(m is None for m in mapped):
+        mapped = [m for m in mapped if m is not None]
+    {% endif %}
+    return mapped

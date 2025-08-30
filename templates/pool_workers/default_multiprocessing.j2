@@ -1,0 +1,29 @@
+{# templates/pool_worker/for_loop_default_multiprocessing.j2 #}
+import multiprocessing as mp
+
+# Worker top-level (evita problemas de pickle)
+def {{loop_label}}__pool_worker(x):
+    {% if pred_expr %}
+    if not ({{pred_expr}}):
+        return None
+    {% endif %}
+    return ({{task_expr}})
+
+def {{loop_label}}_parallel({{iter_param}}):
+    """
+    pool of workers (loop) gerado automaticamente.
+    Estratégia: default → usa mp.Pool.map sobre {{iter_expr}}.
+    """
+    data_list = list({{iter_expr}})
+    if not data_list:
+        return []
+
+    nprocs = max(1, mp.cpu_count())
+    with mp.Pool(processes=nprocs) as pool:
+        out = pool.map({{loop_label}}__pool_worker, data_list)
+
+    {% if pred_expr %}
+    out = [v for v in out if v is not None]
+    {% endif %}
+
+    return out

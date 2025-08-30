@@ -93,7 +93,7 @@ def get_pattern_description(pattern: str) -> str:
                    "It is common in scientific computing and image processing.",
         'pipeline': "The Pipeline pattern involves dividing a task into a series of stages, "
                     "with data flowing through the stages. Each stage can be executed in parallel.",
-        'master_worker': "The Master-Worker pattern involves a master process distributing tasks to worker processes. "
+        'pool_worker': "The pool-workers pattern involves a master process distributing tasks to worker processes. "
                          "It is useful for load balancing and dynamic task allocation.",
         'fork_join': "The Fork-Join pattern involves splitting a task into subtasks, executing them in parallel, "
                      "and then joining the results. It is useful for recursive divide-and-conquer algorithms.",

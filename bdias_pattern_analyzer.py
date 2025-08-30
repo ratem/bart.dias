@@ -161,7 +161,7 @@ class BDiasPatternAnalyzer:
                     "parallelism": "O(n^d/t)"
                 }
             },
-            "master_worker": {
+            "pool_worker": {
                 "structure": ["task_distribution_loop", "work_queue_pattern"],
                 "data_access": "centralized_distribution",
                 "communication": "master_to_workers",
@@ -215,7 +215,21 @@ class BDiasPatternAnalyzer:
             }
         }
 
-        self.pattern_matrix["pool"] = self.pattern_matrix["master_worker"]
+        self.pattern_matrix["pool"] = self.pattern_matrix["pool_worker"]
+
+        self.pattern_matrix["master_slave"] = {
+            "structure": ["explicit_worker_entities", "worker_loop"],
+            "data_access": "centralized_distribution",
+            "communication": "queues_or_pipes",
+            "synchronization": "sentinel_or_timeout_or_eof_or_join",
+            "parallelism": "task_parallel",
+            "suitable_partitioning": ["SIP", "horizontal"],
+            "performance": {
+                "work": "O(n)",
+                "span": "O(n/p + c)",   # c = overhead de coordenação
+                "parallelism": "O(p)"
+            }
+        }
 
         # Pattern detection rules - map_reduce code structures to pattern indicators
         self.pattern_detection_rules = self._initialize_detection_rules()
@@ -294,6 +308,149 @@ class BDiasPatternAnalyzer:
         return True
 
 
+    def _ms__loop_has_get_or_recv(self, loop: ast.AST) -> bool:
+        for n in ast.walk(loop):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in ("get", "recv"):
+                return True
+        return False
+
+    def _ms__has_sentinel_break(self, loop: ast.AST) -> bool:
+        # if ... : break  onde a condição cita SENTINEL/STOP/HALT/END ou None
+        for n in ast.walk(loop):
+            if isinstance(n, ast.If) and any(isinstance(x, ast.Break) for x in ast.walk(n)):
+                cond = ast.unparse(n.test).upper().replace(" ", "")
+                if any(tok in cond for tok in ("SENTINEL", "STOP", "HALT", "END")) \
+                or cond in ("ITEMISNONE", "ITEM==NONE", "NONE==ITEM"):
+                    return True
+        return False
+
+    def _ms__has_timeout_empty_and_event(self, node: ast.AST) -> bool:
+        has_timeout_get = False
+        has_empty_except = False
+        has_event_check = False
+        for n in ast.walk(node):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+                if n.func.attr == "get":
+                    for kw in n.keywords or []:
+                        if isinstance(kw, ast.keyword) and kw.arg == "timeout":
+                            has_timeout_get = True
+                if n.func.attr == "is_set":
+                    has_event_check = True
+            if isinstance(n, ast.ExceptHandler):
+                t = n.type
+                if isinstance(t, ast.Name) and t.id == "Empty": has_empty_except = True
+                if isinstance(t, ast.Attribute) and t.attr == "Empty": has_empty_except = True
+        return has_timeout_get and has_empty_except and has_event_check
+
+    def _ms__has_eof_handler(self, node: ast.AST) -> bool:
+        for n in ast.walk(node):
+            if isinstance(n, ast.ExceptHandler):
+                t = n.type
+                if isinstance(t, ast.Name) and t.id == "EOFError": return True
+                if isinstance(t, ast.Attribute) and t.attr == "EOFError": return True
+        return False
+
+    def _ms__has_join_sync(self, node: ast.AST) -> bool:
+        # join/task_done/join_thread/q.join
+        for n in ast.walk(node):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+                if n.func.attr in ("join", "join_thread", "task_done"):
+                    return True
+        return False
+
+    def _ms__uses_pool_or_executor(self, node: ast.AST) -> bool:
+        for n in ast.walk(node):
+            if isinstance(n, ast.Call):
+                fn = n.func
+                if isinstance(fn, ast.Attribute):
+                    if fn.attr in ("map", "imap", "imap_unordered", "submit"):
+                        # heurística extra: se o objeto tem nome 'pool'/'executor', tratar como pool/executor
+                        base = getattr(fn.value, "id", None)
+                        if base in ("pool", "executor"): return True
+                if isinstance(fn, ast.Name) and fn.id in ("Pool", "ProcessPoolExecutor", "ThreadPoolExecutor"):
+                    return True
+                if isinstance(fn, ast.Attribute) and fn.attr in ("Pool", "ProcessPoolExecutor", "ThreadPoolExecutor"):
+                    return True
+        return False
+
+    def _has_master_slave_worker_like(self, func_node: ast.AST) -> bool:
+        """Detecta padrão master-slave olhando apenas a FUNÇÃO worker (como nos seus testes)."""
+        if isinstance(func_node, ast.Module):
+            # pegue a primeira FunctionDef
+            for b in func_node.body:
+                if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    func_node = b
+                    break
+        if not isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+
+        if self._ms__uses_pool_or_executor(func_node):
+            return False  # não confundir com pool
+
+        has_loop_getrecv = False
+        has_put_or_send = False
+        # loop com get/recv
+        for n in ast.walk(func_node):
+            if isinstance(n, (ast.While, ast.For)) and self._ms__loop_has_get_or_recv(n):
+                has_loop_getrecv = True
+                # algum mecanismo de término aceitável
+                end_ok = (
+                    self._ms__has_sentinel_break(n) or
+                    self._ms__has_timeout_empty_and_event(func_node) or
+                    self._ms__has_eof_handler(func_node) or
+                    self._ms__has_join_sync(func_node)
+                )
+                if not end_ok:
+                    return False
+                break
+
+        # put/send de resultados
+        for n in ast.walk(func_node):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in ("put", "send"):
+                has_put_or_send = True
+                break
+
+        return has_loop_getrecv and has_put_or_send
+
+    def _has_master_slave_module(self, module_node: ast.AST) -> bool:
+        """Detecção no MÓDULO: quando houver criações de Process/Thread + Queue/Pipe etc."""
+        if not isinstance(module_node, ast.Module):
+            return False
+        if self._ms__uses_pool_or_executor(module_node):
+            return False
+
+        has_process_or_thread = False
+        has_queue_or_pipe = False
+        has_put_or_send = False
+        has_worker_loop = False
+        end_ok_any = False
+
+        for n in ast.walk(module_node):
+            if isinstance(n, ast.Call):
+                fn = n.func
+                # Process/Thread/Queue/Pipe criações
+                if isinstance(fn, ast.Name) and fn.id in ("Process", "Thread", "Queue", "Pipe"):
+                    if fn.id in ("Process", "Thread"): has_process_or_thread = True
+                    if fn.id in ("Queue", "Pipe"):    has_queue_or_pipe = True
+                if isinstance(fn, ast.Attribute):
+                    if fn.attr in ("put", "send"): has_put_or_send = True
+
+            if isinstance(n, (ast.While, ast.For)) and self._ms__loop_has_get_or_recv(n):
+                has_worker_loop = True
+                if self._ms__has_sentinel_break(n): end_ok_any = True
+
+        # mecanismos de término no módulo (EOF/timeout/join)
+        if self._ms__has_timeout_empty_and_event(module_node): end_ok_any = True
+        if self._ms__has_eof_handler(module_node):            end_ok_any = True
+        if self._ms__has_join_sync(module_node):              end_ok_any = True
+
+        return (
+            has_worker_loop and has_put_or_send and end_ok_any and
+            (has_process_or_thread or has_queue_or_pipe)  # flexível, não exige ambos
+        )
+
+
+
     def _initialize_detection_rules(self) -> Dict[str, Dict[str, Any]]:
         """
         Initialize the pattern detection rules that map_reduce code structures
@@ -324,7 +481,7 @@ class BDiasPatternAnalyzer:
                 ],
                 "confidence_threshold": 0.7
             },
-            "master_worker": {
+            "pool_worker": {
                 "indicators": [
                     {"type": "loop", "has_task_distribution": True},
                     {"type": "function", "has_work_queue": True}
@@ -351,9 +508,12 @@ class BDiasPatternAnalyzer:
                     {"type": "function", "has_all_to_one_one_to_all": True}
                 ],
                 "confidence_threshold": 0.6
+            },
+            "master_slave": {
+                "confidence_threshold": 0.6 
             }
         }
-        rules["pool"] = rules["master_worker"]
+        rules["pool"] = rules["pool_worker"]
         return rules
 
     def analyze(self, code: str) -> Dict[str, Any]:
@@ -480,6 +640,70 @@ class BDiasPatternAnalyzer:
                     }
                 })
                 pipeline_lines.update(range(func['lineno'], func['end_lineno'] + 1))
+
+
+        # --- 1B. MASTER-SLAVE explícito (Process/Thread + Queue/Pipe + sentinela) ---
+        for func in self.parser.get_all_functions(raw_code):
+            # garanta o AST da função
+            if 'node' not in func:
+                try:
+                    func_node = ast.parse(func['source']).body[0]
+                    func['node'] = func_node
+                except Exception:
+                    continue
+            else:
+                func_node = func['node']
+
+            # evite sobrepor funções já reservadas (ex.: pipeline)
+            if any(func['lineno'] <= ln <= func['end_lineno'] for ln in claimed_lines):
+                continue
+
+            if self._has_master_slave(func):
+                identified_patterns['master_slave'].append({
+                    'type': 'function',
+                    'lineno': func['lineno'],
+                    'confidence': 0.86,
+                    'details': {
+                        'name': func['name'],
+                        'source': func['source'],
+                        'lineno': func['lineno'],
+                        'end_lineno': func['end_lineno']
+                    }
+                })
+                claimed_lines.update(range(func['lineno'], func['end_lineno'] + 1))
+
+
+        # --- Master–Slave (worker-only + module-wide) ---
+        # a) por função (estilo dos seus testes)
+        for fn in self.parser.get_all_functions(raw_code):
+            try:
+                fn_node = ast.parse(fn["source"]).body[0]  
+            except Exception:
+                continue
+            if self._has_master_slave_worker_like(fn_node):
+                identified_patterns.setdefault("master_slave", []).append({
+                    "type": "function",
+                    "lineno": fn.get("lineno", 1),
+                    "confidence": 0.86,
+                    "details": {
+                        "name": fn.get("name"),
+                        "source": fn.get("source"),
+                        "end_lineno": fn.get("end_lineno"),
+                    },
+                })
+
+        # b) por módulo (quando o código inclui criação de Process/Thread/Queue/Pipe)
+        try:
+            mod = ast.parse(raw_code)
+        except Exception:
+            mod = None
+        if mod is not None and self._has_master_slave_module(mod):
+            identified_patterns.setdefault("master_slave", []).append({
+                "type": "module",
+                "lineno": 1,
+                "confidence": 0.9,
+                "details": {"hint": "Process/Thread + Queue/Pipe com término explícito"},
+            })
 
 
 
@@ -743,10 +967,22 @@ class BDiasPatternAnalyzer:
                     "speedup_potential": "Limited by the critical path length."
                 })
 
+
+            if self._has_master_slave(block_node):
+                suggested_patterns.append({
+                    "pattern": "master_slave",
+                    "confidence": 0.85,
+                    "rationale": "Uso explícito de Process/Thread com Queue/Pipe e sentinela.",
+                    "partitioning": ["SIP", "horizontal"],
+                    "description": "Mestre coordena 1..N escravos, fechamento por sentinela/join.",
+                    "speedup_potential": "Quase linear com bom balanceamento e baixo overhead."
+                })
+
+
             # Master-Worker pattern
             if has_task_distribution:
                 suggested_patterns.append({
-                    "pattern": "master_worker",
+                    "pattern": "pool_worker",
                     "confidence": 0.7,
                     "rationale": "The code block distributes independent tasks to workers.",
                     "partitioning": ["SIP", "horizontal", "hash"],
@@ -1143,6 +1379,120 @@ class BDiasPatternAnalyzer:
                 return True
 
         return False
+
+    import ast
+
+    def _has_master_slave(self, node):
+        # --- normalização para AST ---
+        if isinstance(node, dict) and 'source' in node:
+            try:
+                node = ast.parse(node['source'])
+            except Exception:
+                return False
+        if not isinstance(node, (ast.AST,)):
+            return False
+
+        def qname(n):
+            if isinstance(n, ast.Attribute): return f"{qname(n.value)}.{n.attr}"
+            if isinstance(n, ast.Name):      return n.id
+            return ""
+
+        uses_pool_or_exec = False
+        has_proc_or_thread = False
+        has_queue_or_pipe = False
+        has_get_or_recv_loop = False
+        has_sentinel_break = False
+        has_timeout_empty = False
+        has_event_check = False
+        has_eof_handler = False
+        has_join_sync = False
+        has_put_or_send = False
+
+        # 1) varredura geral
+        for n in ast.walk(node):
+            if isinstance(n, ast.Call):
+                fn = qname(n.func)
+                base = fn.split(".")[-1]
+
+                # negativo (pool/executor)
+                if base in ("Pool", "ProcessPoolExecutor", "ThreadPoolExecutor"):
+                    uses_pool_or_exec = True
+
+                # positivo: processos/threads
+                if base in ("Process", "Thread"):
+                    has_proc_or_thread = True
+
+                # canais
+                if base in ("Queue", "Pipe"):
+                    has_queue_or_pipe = True
+
+                # put/send
+                if isinstance(n.func, ast.Attribute) and n.func.attr in ("put", "send"):
+                    has_put_or_send = True
+
+                # join / join_thread / q.join / task_done
+                if isinstance(n.func, ast.Attribute) and n.func.attr in ("join", "join_thread", "task_done"):
+                    has_join_sync = True
+
+                # event.is_set()
+                if isinstance(n.func, ast.Attribute) and n.func.attr == "is_set":
+                    has_event_check = True
+
+                # Queue.get(timeout=...)
+                if isinstance(n.func, ast.Attribute) and n.func.attr == "get":
+                    for kw in n.keywords or []:
+                        if isinstance(kw, ast.keyword) and kw.arg == "timeout":
+                            has_timeout_empty = True  # candidato ao padrão (verifica try/except abaixo)
+
+            # except queue.Empty / EOFError
+            if isinstance(n, ast.ExceptHandler):
+                t = n.type
+                if isinstance(t, ast.Name) and t.id in ("Empty", "EOFError"):
+                    if t.id == "Empty":    has_timeout_empty = True
+                    if t.id == "EOFError": has_eof_handler = True
+                if isinstance(t, ast.Attribute) and t.attr in ("Empty", "EOFError"):
+                    if t.attr == "Empty":    has_timeout_empty = True
+                    if t.attr == "EOFError": has_eof_handler = True
+
+        # 2) loop consumidor: While/For contendo get()/recv()
+        def loop_has_get_or_recv(loop):
+            for m in ast.walk(loop):
+                if isinstance(m, ast.Call) and isinstance(m.func, ast.Attribute) and m.func.attr in ("get", "recv"):
+                    return True
+            return False
+
+        for n in ast.walk(node):
+            if isinstance(n, (ast.While, ast.For)) and loop_has_get_or_recv(n):
+                has_get_or_recv_loop = True
+                # sentinela explícita → if ... break
+                for sub in ast.walk(n):
+                    if isinstance(sub, ast.If) and any(isinstance(x, ast.Break) for x in ast.walk(sub)):
+                        cond = ast.unparse(sub.test).upper().replace(" ", "")
+                        if any(tok in cond for tok in ("SENTINEL", "STOP", "HALT", "END")) \
+                        or cond in ("ITEMISNONE", "ITEM==NONE", "NONE==ITEM"):
+                            has_sentinel_break = True
+                break
+
+        if uses_pool_or_exec:
+            return False  # é pool, não master-slave
+
+        # 3) critérios de aceitação (qualquer um dos mecanismos de término)
+        has_stop_mechanism = (
+            has_sentinel_break
+            or (has_timeout_empty and has_event_check)  # Queue + timeout + Event
+            or has_eof_handler                           # Pipe + EOF
+            or has_join_sync                             # join/task_done/q.join
+        )
+
+        return (
+            has_proc_or_thread
+            and has_queue_or_pipe
+            and has_get_or_recv_loop
+            and has_put_or_send
+            and has_stop_mechanism
+        )
+
+
 
     def _has_task_distribution(self, node):
         """

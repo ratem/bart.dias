@@ -260,9 +260,9 @@ def test_complex_task_graph(n=100):
     
     return result
 
-def test_master_worker_pattern(n=1000):
+def test_pool_worker_pattern(n=1000):
     """
-    Master-worker pattern simulation.
+    pool-workers pattern simulation.
     Work: O(n), Span: O(n/p) where p is number of workers
     """
     tasks = list(range(n))
@@ -431,7 +431,7 @@ def run_all_tests():
         (test_fork_join_pattern, [1000], "Fork-Join Pattern"),
         (test_wavefront_pattern, [30], "Wavefront Pattern"),
         (test_complex_task_graph, [100], "Complex Task Graph"),
-        (test_master_worker_pattern, [1000], "Master-Worker Pattern"),
+        (test_pool_worker_pattern, [1000], "pool-workers Pattern"),
         (test_amdahl_pattern, [1000, 0.1], "Amdahl Pattern (10% sequential)"),
         (test_amdahl_pattern, [1000, 0.5], "Amdahl Pattern (50% sequential)"),
         (test_critical_path_with_branches, [50], "Critical Path with Branches"),

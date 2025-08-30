@@ -1,0 +1,112 @@
+{# templates/master_slave/function_wrap_worker_threads.j2 #}
+from threading import Thread
+from queue import Queue as TQueue, Empty as TEmpty
+
+# --- injeta SOMENTE a função worker, sem executar __main__ ---
+WORKER_SRC = r"""from __future__ import annotations
+{{ worker_def_src }}
+"""
+
+__bart_globals = globals()
+
+# aliases para evitar NameError em anotações ou usos pontuais
+__bart_globals.setdefault("Queue", TQueue)
+__bart_globals.setdefault("Thread", Thread)
+
+# >>> PUBLICA SENTINELAS PADRÃO NO AMBIENTE DO WORKER <<<
+# Se o usuário não definiu END/SENTINEL/STOP/HALT, criamos um único objeto e
+# reusamos para todos os nomes. Isso garante 'is' verdadeiro e evita NameError.
+if "END" not in __bart_globals and "SENTINEL" not in __bart_globals \
+   and "STOP" not in __bart_globals and "HALT" not in __bart_globals:
+    __bart_globals["__BART_SENTINEL__"] = object()
+__bart_globals.setdefault("END", __bart_globals.get("__BART_SENTINEL__"))
+__bart_globals.setdefault("SENTINEL", __bart_globals.get("END"))
+__bart_globals.setdefault("STOP", __bart_globals.get("END"))
+__bart_globals.setdefault("HALT", __bart_globals.get("END"))
+
+# injeta a função worker no mesmo dict; __name__ != "__main__", então __main__ do usuário não roda
+exec(WORKER_SRC, __bart_globals, __bart_globals)
+
+def {{func_name}}_parallel(data, nslaves=None):
+    """
+    wrapper gerado automaticamente para '{{worker_name}}' (master-slave por threads).
+    - Cria TQueue() de tarefas e resultados
+    - Sobe N threads com alvo '{{worker_name}}'
+    - Se o worker usa task_done()/q.join(), NÃO envia sentinela; sincroniza por join da fila
+    - Caso contrário, envia sentinela (END/SENTINEL/STOP/HALT) e dá join nas threads
+    """
+    data_list = list(data)
+    if not data_list:
+        return []
+
+    in_q = TQueue()
+    out_q = TQueue()
+
+    if nslaves is None:
+        try:
+            import os
+            nslaves = max(1, int(os.cpu_count() or 1))
+        except Exception:
+            nslaves = 4
+
+    _worker = __bart_globals.get("{{worker_name}}")
+    if _worker is None:
+        raise RuntimeError("Worker '{{worker_name}}' não foi encontrado após injeção.")
+
+    threads = []
+    {% if worker_calls_task_done %}
+    # --- Modo com task_done()/q.join(): sem sentinela, threads daemon ---
+    for _ in range(nslaves):
+        t = Thread(target=_worker, args=(in_q, out_q), daemon=True)
+        t.start()
+        threads.append(t)
+
+    for i, x in enumerate(data_list):
+        in_q.put((i, x))
+
+    # sincroniza pelo join da fila
+    in_q.join()
+
+    # drena resultados sem bloquear e ordena por índice
+    pairs = []
+    while True:
+        try:
+            pairs.append(out_q.get_nowait())
+        except TEmpty:
+            break
+    pairs.sort(key=lambda kv: kv[0])
+    return [v for _, v in pairs if v is not None]
+    {% else %}
+    # --- Modo sem task_done(): usa sentinela e join das threads ---
+    for _ in range(nslaves):
+        t = Thread(target=_worker, args=(in_q, out_q), daemon=False)
+        t.start()
+        threads.append(t)
+
+    for i, x in enumerate(data_list):
+        in_q.put((i, x))
+
+    # uma sentinela por thread; usa END/SENTINEL/STOP/HALT (o que existir), senão END default
+    _sentinel = (
+        __bart_globals.get("END",
+        __bart_globals.get("SENTINEL",
+        __bart_globals.get("STOP",
+        __bart_globals.get("HALT"))))
+    )
+    for _ in range(nslaves):
+        in_q.put(_sentinel)
+
+    # espera término das threads
+    for t in threads:
+        t.join()
+
+    # drena resultados e ordena por índice
+    pairs = []
+    while True:
+        try:
+            pairs.append(out_q.get_nowait())
+        except TEmpty:
+            break
+    pairs.sort(key=lambda kv: kv[0])
+    return [v for _, v in pairs if v is not None]
+    {% endif %}
