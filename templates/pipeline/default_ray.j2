@@ -1,0 +1,62 @@
+import ray
+
+# Initialize Ray cluster connection
+ray.init(address="auto")
+
+{% for stage_num in range(1, stage_count+1) %}
+@ray.remote
+class Stage{{stage_num}}Actor:
+    """Ray Actor for Stage {{stage_num}} of the pipeline."""
+    
+    def process(self, item):
+        """Process a single item through this pipeline stage."""
+        if item is None:
+            return None
+        
+        # Stage {{stage_num}} processing logic
+{% for line in stage_bodies[stage_num-1] %}
+        {{ line }}
+{% endfor %}
+        return item
+{% endfor %}
+
+@ray.remote
+def run_pipeline(input_data):
+    """
+    Run the pipeline on input_data using Ray Actors.
+    Each stage is a Ray Actor that processes items sequentially within itself,
+    but multiple pipeline instances can run in parallel.
+    """
+    # Create Ray Actors for each stage
+    {% for stage_num in range(1, stage_count+1) %}
+    stage{{stage_num}} = Stage{{stage_num}}Actor.remote()
+    {% endfor %}
+    
+    results = []
+    
+    # Process each item through all pipeline stages
+    for item in input_data:
+        processed_item = item
+        
+        # Pass through each stage sequentially
+        {% for stage_num in range(1, stage_count+1) %}
+        processed_item = ray.get(stage{{stage_num}}.process.remote(processed_item))
+        if processed_item is None:
+            break
+        {% endfor %}
+        
+        if processed_item is not None:
+            results.append(processed_item)
+    
+    return results
+
+if __name__ == '__main__':
+    # Input data for the pipeline
+    data = {{input_data}}
+    
+    # Run pipeline on Ray
+    results_future = run_pipeline.remote(data)
+    results = ray.get(results_future)
+    
+    print(f"Pipeline processed {len(data)} items")
+    print(f"Results: {results}")

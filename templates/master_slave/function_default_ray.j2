@@ -1,0 +1,81 @@
+{# templates/master_slave/function_default_ray.j2 #}
+import ray
+
+# Initialize Ray cluster connection
+ray.init(address="auto")
+
+@ray.remote
+class {{func_name}}MasterSlaveWorker:
+    """
+    Ray Actor for master-slave pattern worker.
+    Each worker processes tasks assigned by the master.
+    """
+    
+    def process_task(self, idx, x):
+        """Process a single task item."""
+        {% if pred_expr %}
+        # Filter condition
+        if not ({{pred_expr}}):
+            return (idx, None)
+        {% endif %}
+        
+        # Task computation
+        y = ({{task_expr}})
+        return (idx, y)
+
+def {{func_name}}_parallel({{func_args|join(", ")}}{% if func_args|length == 0 %}data{% endif %}, nslaves=None):
+    """
+    Master-slave pattern generated automatically for {{func_name}} using Ray.
+    
+    The master coordinates N worker actors via Ray's task scheduling.
+    Results are collected and ordered by index to preserve original sequence.
+    
+    Args:
+        data: Input data to process
+        nslaves: Number of worker actors (default: auto-detected based on cluster)
+    
+    Returns:
+        List of processed results in original order
+    """
+    # Convert input to list
+    data_list = list({{input_data}})
+    
+    if not data_list:
+        return []
+    
+    # Determine number of workers
+    if nslaves is None:
+        # Ray will auto-distribute based on available resources
+        nslaves = max(1, min(len(data_list), 8))  # Cap at 8 workers for efficiency
+    
+    # Create Ray Actor workers (persistent actors for task processing)
+    workers = [{{func_name}}MasterSlaveWorker.remote() for _ in range(nslaves)]
+    
+    # Master distributes tasks to workers in round-robin fashion
+    task_futures = []
+    for i, x in enumerate(data_list):
+        # Assign task to worker (round-robin)
+        worker = workers[i % nslaves]
+        future = worker.process_task.remote(i, x)
+        task_futures.append(future)
+    
+    # Collect results from all workers
+    results = ray.get(task_futures)
+    
+    # Sort results by index to preserve original order
+    results.sort(key=lambda r: r[0])
+    
+    # Extract values (discard indices)
+    acc = [value for idx, value in results]
+    
+    {% if pred_expr %}
+    # Filter out None values from filtered items
+    acc = [v for v in acc if v is not None]
+    {% endif %}
+    
+    return acc
+
+if __name__ == '__main__':
+    # Example usage
+    print(f"Master-slave pattern '{{func_name}}' ready on Ray cluster")
+    print(f"Workers will process: {{input_data}}")

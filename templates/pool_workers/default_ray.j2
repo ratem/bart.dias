@@ -1,0 +1,52 @@
+{# templates/pool_worker/for_loop_default_ray.j2 #}
+import ray
+
+# Initialize Ray cluster connection
+ray.init(address="auto")
+
+@ray.remote
+def {{loop_label}}__pool_worker(x):
+    """
+    Worker function for parallel processing with Ray.
+    Generated automatically by bart.dias.
+    """
+    {% if pred_expr %}
+    # Filter condition
+    if not ({{pred_expr}}):
+        return None
+    {% endif %}
+    
+    # Task computation
+    return ({{task_expr}})
+
+def {{loop_label}}_parallel({{iter_param}}):
+    """
+    Pool of workers (loop) generated automatically.
+    Strategy: default → uses Ray remote tasks for parallel execution.
+    
+    Distributes work across Ray cluster workers for optimal performance.
+    """
+    # Convert iteration expression to list
+    data_list = list({{iter_expr}})
+    
+    if not data_list:
+        return []
+    
+    # Submit all tasks to Ray cluster
+    # Ray automatically distributes them across available workers
+    futures = [{{loop_label}}__pool_worker.remote(item) for item in data_list]
+    
+    # Wait for all tasks to complete and collect results
+    results = ray.get(futures)
+    
+    {% if pred_expr %}
+    # Filter out None values from filtered items
+    results = [v for v in results if v is not None]
+    {% endif %}
+    
+    return results
+
+if __name__ == '__main__':
+    # Example usage
+    print(f"Worker pool '{{loop_label}}' ready on Ray cluster")
+    print(f"Processing iteration: {{iter_expr}}")

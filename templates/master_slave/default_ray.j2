@@ -1,0 +1,66 @@
+{# templates/master_slave/default_ray.j2 #}
+import ray
+
+# Initialize Ray cluster connection  
+ray.init(address="auto")
+
+@ray.remote
+class MasterSlaveWorker:
+    """
+    Ray Actor for master-slave pattern worker.
+    Processes tasks assigned by the master coordinator.
+    """
+    
+    def process_task(self, idx, item):
+        """Process a single task and return indexed result."""
+        # Process the item
+        result = process_item(item)
+        return (idx, result)
+
+def process_item(item):
+    """Define your processing logic here."""
+    # This will be customized based on the actual code pattern
+    return item
+
+def run_master_slave(data, nslaves=None):
+    """
+    Master-slave pattern using Ray Actors.
+    
+    The master distributes work to N persistent worker actors.
+    Workers process tasks independently and return results to master.
+    
+    Args:
+        data: Input data to process
+        nslaves: Number of worker actors (default: based on cluster size)
+    
+    Returns:
+        List of processed results in original order
+    """
+    if not data:
+        return []
+    
+    # Determine number of workers
+    if nslaves is None:
+        nslaves = max(1, min(len(data), 8))
+    
+    # Create persistent worker actors
+    workers = [MasterSlaveWorker.remote() for _ in range(nslaves)]
+    
+    # Master distributes tasks to workers
+    task_futures = []
+    for i, item in enumerate(data):
+        worker = workers[i % nslaves]
+        future = worker.process_task.remote(i, item)
+        task_futures.append(future)
+    
+    # Collect and order results
+    results = ray.get(task_futures)
+    results.sort(key=lambda r: r[0])
+    
+    return [value for idx, value in results]
+
+if __name__ == '__main__':
+    # Example usage
+    data = list(range(100))
+    results = run_master_slave(data)
+    print(f"Processed {len(results)} items using Ray master-slave pattern")

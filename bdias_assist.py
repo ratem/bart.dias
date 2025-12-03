@@ -31,9 +31,10 @@ theoretical insights into the parallelism potential of the analyzed code.
 
 
 class BDiasAssist:
-    def __init__(self, parser, code_generator):
+    def __init__(self, parser, code_generator, target_runtime="multiprocessing"):
         self.parser = parser
         self.code_generator = code_generator
+        self.target_runtime = target_runtime  # Store target runtime for code generation
 
     def _handle_critical_path_analysis(self, code: str):
         """Handle critical path analysis workflow."""
@@ -171,7 +172,7 @@ class BDiasAssist:
                     # Pass full module source so the transformer sees the real FunctionDef
                     full_bk = bk.copy()
                     full_bk["source"] = code
-                    orig, transformed, ctx = generate_parallel_code(full_bk, top_pat, strategies)
+                    orig, transformed, ctx = generate_parallel_code(full_bk, top_pat, strategies, self.target_runtime)
                     presentation = present_transformation(orig, transformed, {
                         "pattern": top_pat,
                         "partitioning_strategy": strategies,
@@ -199,7 +200,8 @@ class BDiasAssist:
         original_code, transformed_code, context = generate_parallel_code(
             bottleneck,
             pattern,
-            partitioning_strategy
+            partitioning_strategy,
+            self.target_runtime
         )
 
         # Present the transformation
@@ -422,7 +424,7 @@ class BDiasAssist:
         while True:
             code = input("Enter your Python code or a file path, or type 'exit' to quit: ")
             if len(code) == 0:
-                code = "./tests/examples/maste-slave/thread_q_join.py"  # Default example code
+                code = "./tests/examples/example_blocks.py"  # Default example code
                 print("Assuming "+code)
             if not self.process_code(code):
                 break

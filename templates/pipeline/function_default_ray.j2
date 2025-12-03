@@ -1,0 +1,73 @@
+{# templates/pipeline/function_default_ray.j2 #}
+import ray
+
+# Initialize Ray cluster connection
+ray.init(address="auto")
+
+{% for stage_desc in stage_exprs %}
+@ray.remote
+class Stage{{loop.index}}Actor:
+    """Ray Actor for Stage {{loop.index}} of the pipeline."""
+    
+    def process(self, item):
+        """Process a single item through this pipeline stage."""
+        if item is None:
+            return None
+        
+        x = item
+        {% if stage_desc.pred %}
+        # Filter condition for this stage
+        if not ({{stage_desc.pred}}):
+            return None
+        {% endif %}
+        
+        # Stage {{loop.index}} transformation
+        result = {{stage_desc.expr}}
+        return result
+{% endfor %}
+
+def {{func_name}}_parallel({{func_args|join(", ")}}):
+    """
+    Pipeline pattern generated automatically for {{func_name}} using Ray.
+    
+    Each stage is a Ray Actor that processes items.
+    Multiple pipeline instances can run in parallel across the cluster.
+    
+    Args:
+        {{input_data}}: Input data to process through pipeline
+    
+    Returns:
+        List of processed results after all pipeline stages
+    """
+    # Get input data
+    data = list({{input_data}})
+    
+    if not data:
+        return []
+    
+    # Create Ray Actors for each pipeline stage
+    {% for stage_desc in stage_exprs %}
+    stage{{loop.index}} = Stage{{loop.index}}Actor.remote()
+    {% endfor %}
+    
+    # Process each item through all pipeline stages
+    results = []
+    
+    for item in data:
+        current_item = item
+        
+        # Pass through each stage sequentially
+        {% for stage_desc in stage_exprs %}
+        current_item = ray.get(stage{{loop.index}}.process.remote(current_item))
+        if current_item is None:
+            break  # Item filtered out
+        {% endfor %}
+        
+        if current_item is not None:
+            results.append(current_item)
+    
+    return results
+
+if __name__ == '__main__':
+    # Example usage
+    print(f"Pipeline function '{{func_name}}' ready with {{stage_exprs|length}} stages on Ray cluster")

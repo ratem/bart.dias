@@ -53,8 +53,10 @@ class BDiasPatternTransformer(ast.NodeTransformer):
         self.context = {}  # For template rendering
 
         # Initialize Jinja2 environment
+        import os
+        template_dir = os.path.join(os.path.dirname(__file__), 'templates')
         self.env = jinja2.Environment(
-            loader=jinja2.FileSystemLoader('templates'),
+            loader=jinja2.FileSystemLoader(template_dir),
             trim_blocks=True,
             lstrip_blocks=True
         )
@@ -197,13 +199,15 @@ class MapReducePatternTransformer(BDiasPatternTransformer):
         # Extract loop components
         loop_var = ast.unparse(node.target)
         iter_expr = ast.unparse(node.iter)
-        body = ast.unparse(node.body)
+        # Transform body to define 'result'
+        # We need to find the append call and replace it with assignment to 'result'
+        body = self._transform_body_for_map(node.body)
 
         # Store context for template rendering
         self.context.update({
             'loop_var': loop_var,
             'iter_expr': iter_expr,
-            'body': body,  # This is the key line - storing the loop body
+            'body': body,
             'partitioning_strategy': self.partitioning_strategy
         })
 
@@ -213,6 +217,51 @@ class MapReducePatternTransformer(BDiasPatternTransformer):
 
         # Return the original node (transformation happens in template)
         return node
+
+    def _transform_body_for_map(self, body_nodes: List[ast.stmt]) -> str:
+        """
+        Transform loop body to return result instead of appending to list.
+        Finds list.append(x) and replaces with result = x.
+        """
+        new_body = []
+        found_append = False
+        
+        for node in body_nodes:
+            # Check for Expr(Call(func=Attribute(attr='append')))
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                call = node.value
+                if isinstance(call.func, ast.Attribute) and call.func.attr == 'append':
+                    # Found append! Replace with result = arg
+                    if call.args:
+                        assign = ast.Assign(
+                            targets=[ast.Name(id='result', ctx=ast.Store())],
+                            value=call.args[0]
+                        )
+                        # Copy location from original node to avoid 'lineno' errors
+                        ast.copy_location(assign, node)
+                        ast.fix_missing_locations(assign)
+                        new_body.append(assign)
+                        found_append = True
+                        continue
+            
+            new_body.append(node)
+            
+        if not found_append:
+            # If no append found, add result = None to avoid NameError
+            assign = ast.Assign(
+                targets=[ast.Name(id='result', ctx=ast.Store())],
+                value=ast.Constant(value=None)
+            )
+            if body_nodes:
+                ast.copy_location(assign, body_nodes[-1])
+            else:
+                assign.lineno = 1
+                assign.col_offset = 0
+            new_body.append(assign)
+            
+        # Wrap in a Module to unparse a list of statements
+        wrapper = ast.Module(body=new_body, type_ignores=[])
+        return ast.unparse(wrapper)
 
     def _is_target_node(self, node: ast.AST) -> bool:
         """
@@ -662,11 +711,21 @@ def generate_hardware_recommendations(context: Dict[str, Any]) -> str:
 def generate_parallel_code(
     bottleneck: Dict[str, Any],
     pattern: str,
-    partitioning_strategy: List[str]
+    partitioning_strategy: List[str],
+    target_runtime: str = "multiprocessing"
 ) -> Tuple[str, str, Dict[str, Any]]:
     """
     Dispatch to the correct transformer, run the AST pass, finalize imports,
     then render the appropriate Jinja2 template with a fully-populated context.
+    
+    Args:
+        bottleneck: Dictionary containing bottleneck information
+        pattern: Pattern type ('map_reduce', 'pipeline', 'pool_workers', etc.)
+        partitioning_strategy: List of partitioning strategies
+        target_runtime: Target parallel runtime - 'multiprocessing' or 'ray' (default: 'multiprocessing')
+    
+    Returns:
+        Tuple of (source_code, transformed_code, context)
     """
     source_code = bottleneck['source']
     tree = ast.parse(source_code)
@@ -692,30 +751,70 @@ def generate_parallel_code(
         raise ValueError("Pipeline reconhecida, mas nenhum estágio extraído para codegen.")
     transformer.finalize(tree)
 
-    # 3. Select the template based on pattern, function status, and strategy
+    # Extract preamble (code before the bottleneck) to preserve context (imports, variables)
+    bottleneck_lineno = bottleneck.get('lineno', 1)
+    lines = source_code.split('\n')
+    # Keep lines before the bottleneck. 
+    # Note: This is a simple heuristic. For complex nested structures, AST replacement would be better.
+    if bottleneck_lineno > 1:
+        preamble = '\n'.join(lines[:bottleneck_lineno - 1])
+        transformer.context['preamble'] = preamble
+    else:
+        transformer.context['preamble'] = ""
+
+    # 3. Select the template based on pattern, function status, strategy, and target runtime
     # Unified logic for all patterns
     is_function = 'func_name' in transformer.context
     strat = partitioning_strategy[0].lower()
+    
+    # Normalize target_runtime
+    if target_runtime not in ('multiprocessing', 'ray'):
+        raise ValueError(f"Invalid target_runtime: '{target_runtime}'. Must be 'multiprocessing' or 'ray'.")
+    
+    # Store runtime in context for templates that might need it
+    transformer.context['target_runtime'] = target_runtime
 
     # Seleção especial para master_slave "worker-like"
     if pattern == 'master_slave' and transformer.context.get('wrap_existing_worker'):
         template_name = f"{pattern}/function_wrap_worker_threads.j2"
     else:
-        if is_function:
-            template_name = f"{pattern}/function_{strat}_multiprocessing.j2"
+        # Template selection based on runtime
+        if target_runtime == 'ray':
+            # Ray templates: always use default for now (can be extended with strategies later)
+            if is_function:
+                template_name = f"{pattern}/function_default_ray.j2"
+            else:
+                template_name = f"{pattern}/default_ray.j2"
         else:
-            template_name = f"{pattern}/{strat}_multiprocessing.j2"
+            # Multiprocessing templates (original behavior)
+            if is_function:
+                template_name = f"{pattern}/function_{strat}_multiprocessing.j2"
+            else:
+                template_name = f"{pattern}/{strat}_multiprocessing.j2"
 
     try:
         tpl = transformer.env.get_template(template_name)
     except jinja2.exceptions.TemplateNotFound:
+        # Fallback logic
         if pattern == 'master_slave' and transformer.context.get('wrap_existing_worker'):
             tpl = transformer.env.get_template(f"{pattern}/function_wrap_worker_threads.j2")
         else:
-            if is_function:
-                tpl = transformer.env.get_template(f"{pattern}/function_default_multiprocessing.j2")
+            if target_runtime == 'ray':
+                # Fallback to default Ray template
+                fallback_name = f"{pattern}/function_default_ray.j2" if is_function else f"{pattern}/default_ray.j2"
+                try:
+                    tpl = transformer.env.get_template(fallback_name)
+                except jinja2.exceptions.TemplateNotFound:
+                    raise ValueError(
+                        f"Ray template not found: '{template_name}' or fallback '{fallback_name}'. "
+                        f"Please ensure Ray templates are created in templates/{pattern}/"
+                    )
             else:
-                tpl = transformer.env.get_template(f"{pattern}/default_multiprocessing.j2")
+                # Fallback to default multiprocessing template
+                if is_function:
+                    tpl = transformer.env.get_template(f"{pattern}/function_default_multiprocessing.j2")
+                else:
+                    tpl = transformer.env.get_template(f"{pattern}/default_multiprocessing.j2")
 
 
     # 4. Render the template with the populated context
@@ -728,6 +827,7 @@ def generate_parallel_code(
         transformer.context.setdefault('processor_count', cpu_count())
 
     return source_code, transformed_code, transformer.context
+
 
 
 

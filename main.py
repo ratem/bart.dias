@@ -8,6 +8,7 @@ Features:
 - Initializes and coordinates the main components of Bart.dIAs
 - Sets up explanations and partitioning suggestions for various code patterns
 - Launches the interactive session for code analysis
+- Supports multiple parallel runtimes (multiprocessing, Ray)
 
 Components Initialized:
 - BDiasParser: For parsing and analyzing Python code
@@ -15,16 +16,44 @@ Components Initialized:
 - BDiasAssist: For handling user interactions and presenting results
 
 Usage:
-Run this script to start an interactive session with Bart.dIAs.
+    python main.py                    # Use multiprocessing (default)
+    python main.py --target ray       # Generate code for Ray distributed runtime
+    python main.py --target multiprocessing  # Explicitly use multiprocessing
 """
 
-
+import argparse
 from bdias_parser import BDiasParser
 from bdias_assist import BDiasAssist
 from bdias_code_gen import BDiasCodeGen
 
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description='Bart.dIAs - Python code parallelization assistant',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                          # Use multiprocessing (default)
+  %(prog)s --target ray             # Generate Ray-based parallel code
+  %(prog)s --target multiprocessing # Explicitly use multiprocessing
+        """
+    )
+    parser.add_argument(
+        '--target',
+        choices=['multiprocessing', 'ray'],
+        default='multiprocessing',
+        help='Target parallel runtime for code generation (default: multiprocessing)'
+    )
+    
+    args = parser.parse_args()
+    
+    # Display chosen runtime
+    print(f"Bart.dIAs - Parallel Runtime: {args.target}")
+    if args.target == 'ray':
+        print("Note: Generated code will use Ray for distributed execution.")
+        print("Ensure a Ray cluster is available when running generated code.\n")
+    
     # Explanations corresponding to the indices used in find_parallelization_opportunities
     EXPLANATIONS = {
         'loop': "This 'for' loop iterates over {iterable_name} using the loop variable '{loop_var}'. "
@@ -64,7 +93,7 @@ if __name__ == "__main__":
         'while_with_loop_functions': "For while loops calling functions with loops, consider parallelizing the function calls within each while iteration, being careful to maintain any dependencies."
     }
 
-    parser = BDiasParser()
+    bdias_parser = BDiasParser()
     code_generator = BDiasCodeGen(EXPLANATIONS, PARTITIONING_SUGGESTIONS)
-    assistant = BDiasAssist(parser, code_generator)
+    assistant = BDiasAssist(bdias_parser, code_generator, target_runtime=args.target)
     assistant.run_interactive_session()

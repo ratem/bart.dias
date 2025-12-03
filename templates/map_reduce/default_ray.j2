@@ -1,0 +1,35 @@
+import ray
+{{ preamble }}
+
+# Initialize Ray - connects to existing cluster or starts local
+ray.init(address="auto")
+
+@ray.remote
+def map_function({{ loop_var }}):
+    """Map function - processes individual data elements in parallel."""
+    {{ body }}
+    return result
+
+@ray.remote
+def reduce_function(results):
+    """Reduce function - combines results from all map operations."""
+    from functools import reduce
+    return reduce(lambda x, y: x + y, results)
+
+if __name__ == '__main__':
+    # Get data from the iteration expression
+    data = {{ iter_expr }}
+    
+    # Map phase: Submit tasks to Ray cluster
+    # Each data element is processed in parallel on available workers
+    map_futures = [map_function.remote(item) for item in data]
+    
+    # Wait for all map tasks to complete and collect results
+    mapped_results = ray.get(map_futures)
+    
+    # Reduce phase: Combine all results
+    final_result_future = reduce_function.remote(mapped_results)
+    final_result = ray.get(final_result_future)
+    
+    print(f"Final result: {final_result}")
+    print(f"Processed {len(data)} items using Ray distributed computing")
