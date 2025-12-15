@@ -1,0 +1,62 @@
+import ray
+{{ preamble }}
+
+# Initialize Ray - connects to existing cluster or starts local
+ray.init(address="auto")
+
+@ray.remote
+def {{ func_name }}_worker({{ ", ".join(func_args) }}):
+    """Worker function - processes data in parallel using Ray."""
+{{ func_body | indent(4, first=True) }}
+
+@ray.remote
+def {{ func_name }}_reduce(results):
+    """Reduce function - combines results from all workers."""
+    from functools import reduce
+    return reduce(lambda x, y: x + y, results)
+
+def {{ func_name }}_parallel({{ ", ".join(func_args) }}):
+    """Parallel version using Ray distributed computing."""
+    {% if is_class_method %}
+    # For class methods, create multiple worker instances
+    import copy
+    num_workers = int(ray.available_resources().get('CPU', 4))
+    instances = [copy.deepcopy(self) for _ in range(num_workers)]
+    map_futures = [{{ func_name }}_worker.remote(instance) for instance in instances]
+    {% else %}
+    # For regular functions, use Ray's equivalent of pool.map
+    # Call the worker function with each item from the first argument
+    map_futures = [{{ func_name }}_worker.remote(item) for item in {{ func_args[0] if func_args else "data" }}]
+    {% endif %}
+    
+    # Wait for all map tasks to complete and collect results
+    mapped_results = ray.get(map_futures)
+    
+    # Reduce phase: Combine all results
+    final_result_future = {{ func_name }}_reduce.remote(mapped_results)
+    final_result = ray.get(final_result_future)
+    
+    return final_result
+
+if __name__ == '__main__':
+    # Example usage
+    {% if is_class_method %}
+    # For class methods, create an instance first
+    instance = SomeClass()
+    {% if func_args|length > 1 %}
+    result = instance.{{ func_name }}_parallel({{ func_args[1] }})
+    {% else %}
+    result = instance.{{ func_name }}_parallel()
+    {% endif %}
+    {% else %}
+    # For regular functions - use example data
+    {% if func_args %}
+    example_data = list(range(10))  # Example: process 10 items
+    result = {{ func_name }}_parallel(example_data)
+    {% else %}
+    result = {{ func_name }}_parallel()
+    {% endif %}
+    {% endif %}
+    
+    print(f"Final result: {result}")
+    print(f"Processed using Ray distributed computing")
